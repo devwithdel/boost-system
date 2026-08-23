@@ -1,4 +1,4 @@
-# BOOST — Login Module (Section 1 & 2 slice)
+# BOOST — Login Module
 
 This is the first working slice of BOOST: the **login page** (frontend) wired
 to **real authentication** (backend + PostgreSQL). It implements:
