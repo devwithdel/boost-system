@@ -76,7 +76,7 @@ placeholder gets replaced when we build the real Dashboard module next.
   XSS bug can't just read it out of localStorage.
 - Login endpoint is rate-limited (10 attempts / 15 min per IP) on top of
   **per-account lockout** after 5 failed attempts (15-minute lock).
-- Login errors are generic ("Invalid email/username or password") so the
+- Login errors are generic ("Invalid email or password") so the
   system never confirms whether a given email/username exists.
 - Helmet sets a restrictive Content-Security-Policy.
 - All DB queries are parameterized — no string-concatenated SQL.
