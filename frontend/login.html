@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BOOST - Sign In</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <main class="page">
+    <div class="auth-card">
+      <section class="signin-panel">
+        <div class="signin-inner">
+          <div class="brand-panel" aria-hidden="true">
+            <img class="brand-logo" src="assets/boost-logo-mark.png" alt="BOOST — Procurement & Order Operations System" />
+          </div>
+
+          <h1 class="welcome">Log in to your account</h1>
+          <p class="subheading">Procurement &amp; Order Operations System</p>
+
+          <form id="login-form" novalidate>
+            <div class="field">
+              <label for="identifier">Email</label>
+              <input
+                type="text"
+                id="identifier"
+                name="identifier"
+                autocomplete="username"
+                placeholder="you@company.com"
+                required
+              />
+            </div>
+
+            <div class="field">
+              <label for="password">Password</label>
+              <div class="password-wrap">
+                <input
+                  type="password"
+                  id="password"
+                  name="password"
+                  autocomplete="current-password"
+                  placeholder="••••••••"
+                  required
+                />
+                <button type="button" class="toggle-visibility" id="toggle-password" aria-label="Show password">
+                  <svg class="icon-eye" viewBox="0 0 24 24"><path d="M12 5c-7.633 0-11 6.5-11 7s3.367 7 11 7 11-6.5 11-7-3.367-7-11-7zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9z"/><circle cx="12" cy="12" r="2"/></svg>
+                  <svg class="icon-eye-off" viewBox="0 0 24 24" hidden><path d="M2 4.27 3.28 3 21 20.72 19.73 22l-3.08-3.08A11.6 11.6 0 0 1 12 20C4.367 20 1 13.5 1 13a13.6 13.6 0 0 1 4.06-5.44L2 4.27zM12 7.5a4.5 4.5 0 0 1 4.5 4.5c0 .59-.13 1.14-.35 1.64l1.47 1.47A6.98 6.98 0 0 0 19 12c0-.5-3.37-7-11-7-.94 0-1.8.09-2.6.26l1.72 1.72A4.5 4.5 0 0 1 12 7.5z"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <p class="form-error" id="form-error" role="alert" hidden></p>
+
+            <button type="submit" class="btn-signin" id="signin-btn">Sign in</button>
+
+            <a href="#" class="forgot-link">Forgot Password?</a>
+          </form>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="js/login.js"></script>
+</body>
+</html>
