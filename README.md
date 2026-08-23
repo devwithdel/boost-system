@@ -1,4 +1,4 @@
-# BOOST — Login Module
+# 1. Login Module
 
 This is the first working slice of BOOST: the **login page** (frontend) wired
 to **real authentication** (backend + PostgreSQL). It implements:
@@ -90,5 +90,5 @@ stakeholder interview, as agreed.
 
 ## Next module
 
-Section 3 (Dashboard) — procurement summary, pending requests, active
+Dashboard — procurement summary, pending requests, active
 quotations/bids, orders, recent documents.
