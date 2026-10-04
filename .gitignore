@@ -12,3 +12,8 @@
 # OS files
 .DS_Store
 Thumbs.db
+# OCR language data (downloaded by setup, not committed)
+backend/langdata/
+
+# User-uploaded scans and photos
+backend/uploads/

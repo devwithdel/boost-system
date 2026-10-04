@@ -27,6 +27,7 @@ body {
 
 .page {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -119,6 +120,13 @@ body {
 
 .password-wrap input {
   padding-right: 46px;
+}
+
+/* Hide Edge/IE's native password reveal + clear buttons — the form has its
+   own show/hide toggle, so the built-in one just duplicates it. */
+.password-wrap input::-ms-reveal,
+.password-wrap input::-ms-clear {
+  display: none;
 }
 .toggle-visibility {
   position: absolute;
@@ -224,6 +232,32 @@ body {
 
   .welcome {
     font-size: 20px;
+  }
+
+  /* 16px+ inputs stop iOS Safari auto-zooming on focus, which otherwise
+     shifts the card and clips field text on narrow screens. */
+  .field input {
+    font-size: 16px;
+  }
+}
+
+/* Short screens (keyboard open, small phones): pull the card up so the
+   Sign in button stays reachable instead of being pushed below the fold. */
+@media (max-width: 480px) and (max-height: 640px) {
+  .page {
+    padding-top: 24px;
+  }
+
+  .signin-panel {
+    padding: 24px 20px;
+  }
+
+  .brand-panel {
+    margin-bottom: 12px;
+  }
+
+  .subheading {
+    margin-bottom: 18px;
   }
 }
 

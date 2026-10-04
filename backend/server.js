@@ -7,9 +7,36 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 
 const authRoutes = require("./routes/auth");
+const dashboardRoutes = require("./routes/dashboard");
+const moduleRoutes = require("./routes/modules");
+const notificationRoutes = require("./routes/notifications");
+const requestRoutes = require("./routes/requests");
+const scannerRoutes = require("./routes/scanner");
+const { optionalAuth, requirePageAuth, redirectIfAuthenticated } = require("./middleware/auth");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const HOST = process.env.HOST || "0.0.0.0";
+const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
+
+// Last line of defence. This is a single-process system, so one unhandled
+// error anywhere (a native OCR failure, a bad stream) would otherwise take
+// procurement offline for everyone. Log it loudly and keep serving; the
+// supervisor restarts only if the process truly dies.
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION (server continues):", (err && err.stack) || err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED REJECTION (server continues):", (reason && reason.stack) || reason);
+});
+
+function getAllowedOrigins() {
+  const raw = process.env.FRONTEND_ORIGIN || "http://localhost:4000";
+  return raw
+    .split(",")
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+}
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === "replace_this_with_a_generated_secret") {
   console.warn(
@@ -29,6 +56,10 @@ app.use(
         connectSrc: ["'self'"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
+        // No HTTPS on LAN/dev, so never ask browsers to upgrade
+        // http:// subresources to https:// (that breaks all CSS/JS/img
+        // on plain-HTTP hosts like 192.168.x.x). Re-enable behind TLS.
+        upgradeInsecureRequests: null,
       },
     },
   })
@@ -36,26 +67,97 @@ app.use(
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_ORIGIN || "http://localhost:4000",
+    origin: (origin, callback) => {
+      // Same-origin page loads and curl have no Origin header — allow them.
+      if (!origin) return callback(null, true);
+      const allowed = getAllowedOrigins();
+      if (allowed.includes(origin)) return callback(null, true);
+      return callback(null, false);
+    },
     credentials: true,
   })
 );
 
+// Scanner uploads arrive as base64 inside JSON, so allow larger bodies there.
+app.use("/api/scanner", express.json({ limit: "12mb" }));
 app.use(express.json());
 app.use(cookieParser());
 
+// Lightweight API request log — the only server-side trace of what the
+// phone actually requested (successes are otherwise silent).
+// no-store: fetch().json() cannot parse Express 304 (empty-body) replies,
+// so API responses must never be revalidated from cache.
+app.use("/api", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  const started = Date.now();
+  res.on("finish", () => {
+    console.log(`[api] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - started}ms)`);
+  });
+  next();
+});
+
 // --- API routes ---
 app.use("/api/auth", authRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/modules", requestRoutes);
+app.use("/api/modules", moduleRoutes);
+app.use("/api/scanner", scannerRoutes);
+app.use("/api/notifications", notificationRoutes);
+
+// Short aliases so module pages can call /api/requests directly.
+// requests.js is mounted first so it owns every /api/requests* path.
+app.use("/api", requestRoutes);
+app.use("/api", moduleRoutes);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// --- Static frontend ---
-const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
-app.use(express.static(FRONTEND_DIR));
+// --- Authenticated and public pages ---
+// Keep page routes ahead of express.static so /dashboard.html cannot bypass the
+// same authentication check as the friendly /dashboard route.
+// no-store keeps phones on the newest shell/JS instead of a stale cached copy.
+function sendPage(res, file) {
+  res.set("Cache-Control", "no-store");
+  return res.sendFile(path.join(FRONTEND_DIR, file));
+}
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(FRONTEND_DIR, "login.html"));
+app.get("/", optionalAuth, (req, res) => {
+  return req.user ? res.redirect("/dashboard") : sendPage(res, "login.html");
 });
+
+app.get("/login", redirectIfAuthenticated, (req, res) => {
+  return sendPage(res, "login.html");
+});
+
+app.get("/login.html", redirectIfAuthenticated, (req, res) => {
+  return sendPage(res, "login.html");
+});
+
+app.get("/dashboard", requirePageAuth, (req, res) => {
+  return sendPage(res, "dashboard.html");
+});
+
+app.get("/dashboard.html", requirePageAuth, (req, res) => {
+  return sendPage(res, "dashboard.html");
+});
+
+// One route per module so no two modules share a page.
+const MODULE_PAGES = [
+  ["requests", "requests"],
+  ["quotations", "quotations"],
+  ["bidding", "bidding"],
+  ["orders", "orders"],
+  ["documents", "documents"],
+  ["scanner", "scanner"],
+  ["reports", "reports"],
+  ["settings", "settings"],
+];
+
+MODULE_PAGES.forEach(([url, file]) => {
+  app.get(`/${url}`, requirePageAuth, (req, res) => sendPage(res, `${file}.html`));
+});
+
+// --- Static frontend ---
+app.use(express.static(FRONTEND_DIR));
 
 // --- 404 + error handling ---
 app.use("/api", (req, res) => {
@@ -67,6 +169,16 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Something went wrong." });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
+  const os = require("os");
+  const nets = os.networkInterfaces();
+  const lanUrls = new Set();
+  for (const addrs of Object.values(nets)) {
+    for (const a of addrs || []) {
+      if (a.family === "IPv4" && !a.internal) lanUrls.add(`http://${a.address}:${PORT}`);
+    }
+  }
   console.log(`BOOST running at http://localhost:${PORT}`);
+  for (const url of lanUrls) console.log(`BOOST on your network at ${url}`);
+  console.log(`Allowed CORS origins: ${getAllowedOrigins().join(", ")}`);
 });

@@ -92,7 +92,19 @@ router.post("/login", loginLimiter, async (req, res) => {
         ]
       );
 
-      return res.status(401).json(genericError);
+      // Tell the user how close they are to a lockout so a typo doesn't
+      // silently cost them 15 minutes. Still never reveals whether the
+      // account exists.
+      const remaining = lock ? 0 : MAX_FAILED_ATTEMPTS - attempts;
+      return res.status(401).json({
+        ...genericError,
+        attemptsRemaining: remaining,
+        hint: lock
+          ? `Too many failed attempts. This account is now locked for ${LOCK_DURATION_MINUTES} minutes.`
+          : remaining <= 2
+            ? `${remaining} attempt${remaining === 1 ? "" : "s"} remaining before a ${LOCK_DURATION_MINUTES}-minute lockout.`
+            : undefined,
+      });
     }
 
     // Successful login — reset failed attempts, stamp last login
@@ -159,6 +171,38 @@ router.get("/me", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Me endpoint error:", err);
     return res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+/**
+ * GET /api/auth/session-info
+ * Security posture of the signed-in account (for the Settings screen).
+ */
+router.get("/session-info", requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT last_login_at, failed_attempts, locked_until, created_at
+       FROM users WHERE id = $1`,
+      [req.user.sub]
+    );
+    const user = rows[0];
+    if (!user) return res.status(401).json({ error: "Not authenticated." });
+
+    const locked = Boolean(user.locked_until && new Date(user.locked_until) > new Date());
+
+    return res.json({
+      lastLoginAt: user.last_login_at,
+      failedAttempts: Number(user.failed_attempts) || 0,
+      maxAttempts: MAX_FAILED_ATTEMPTS,
+      lockedUntil: locked ? user.locked_until : null,
+      memberSince: user.created_at,
+      sessionExpiresInHours: Math.round(
+        (Number(process.env.JWT_EXPIRES_IN?.match(/^(\d+)h$/)?.[1] || 8))
+      ),
+    });
+  } catch (err) {
+    console.error("Session info error:", err);
+    return res.status(500).json({ error: "Could not load account security details." });
   }
 });
 

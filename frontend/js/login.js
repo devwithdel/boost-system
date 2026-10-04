@@ -25,6 +25,15 @@
     errorEl.hidden = true;
   }
 
+  function getSafeNextPath() {
+    const next = new URLSearchParams(window.location.search).get("next");
+    // Only allow same-origin absolute paths (no //, no protocol, no backslash).
+    if (typeof next === "string" && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\")) {
+      return next;
+    }
+    return "/dashboard";
+  }
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     clearError();
@@ -51,11 +60,15 @@
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        showError(data.error || "Unable to sign in. Please try again.");
+        // The backend warns when the account is close to a lockout, so a
+        // typo doesn't silently cost the user 15 minutes.
+        var message = data.error || "Unable to sign in. Please try again.";
+        if (data.hint) message += " " + data.hint;
+        showError(message);
         return;
       }
 
-      window.location.href = "/dashboard.html";
+      window.location.href = getSafeNextPath();
     } catch (err) {
       console.error("Login request failed:", err);
       showError("Could not reach the server. Please check your connection and try again.");
