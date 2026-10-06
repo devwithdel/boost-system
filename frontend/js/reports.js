@@ -520,7 +520,7 @@
         '<article class="card kpi">' +
         '<div class="kpi-top"><span>Savings vs Estimate</span><span class="kpi-ico">' + BOOST.icon("trophy", { size: 17 }) + "</span></div>" +
         '<p class="kpi-value">' +
-        BOOST.esc((o.savings > 0 ? "▼ " : o.savings < 0 ? "▲ " : "") + BOOST.fmtMoneyK(Math.abs(o.savings || 0))) +
+        BOOST.esc(BOOST.fmtMoneyK(Math.abs(o.savings || 0))) +
         "</p>" +
         '<div class="kpi-trend' + (Number(o.savings || 0) < 0 ? " down" : "") + '"><b>' +
         (Number(o.savings || 0) < 0 ? "▼" : "↗") + "</b><span>" + (o.savingsPct || 0) + "% against estimate</span></div>" +

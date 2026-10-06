@@ -325,7 +325,10 @@
       kpi("Open Packages", "bidding", a.openPackages || 0, (a.packages || 0) + " packages in total", false, "/bidding?status=open") +
       kpi("Awarded Value", "wallet", BOOST.fmtMoneyK(a.awardedValue), (a.awardedLast30d || 0) + " awards in last 30 days", false, "/bidding?status=awarded") +
       kpi("Savings vs Estimate", "trophy",
-          (a.savings > 0 ? "▼ " : a.savings < 0 ? "▲ " : "") + BOOST.fmtMoneyK(Math.abs(a.savings || 0)),
+          BOOST.fmtMoneyK(Math.abs(a.savings || 0)),
+          // kpi() already draws the direction from the flag below, so no arrow
+          // is added to the figure itself. Handing it one here put a red
+          // "down" next to positive savings, because the sign was inverted.
           (a.savingsPct || 0) + "% against estimate", Number(a.savings || 0) < 0, "/bidding?status=awarded") +
       kpi("Suppliers", "users", a.suppliers || 0, (a.submissions || 0) + " bids submitted", false, "/bidding")
     );

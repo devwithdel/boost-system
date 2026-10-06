@@ -13,7 +13,13 @@
     "reset": "node scripts/reset.js",
     "migrate": "node scripts/migrate.js",
     "check:routes": "node scripts/route-check.js",
-    "ocr:setup": "node scripts/setup-ocr.js"
+    "check:schema": "node scripts/check-schema.js",
+    "check:diagrams": "node scripts/check-diagrams.js",
+    "check": "npm run check:schema && npm run check:diagrams && npm run check:routes",
+    "ocr:setup": "node scripts/setup-ocr.js",
+    "docs:shots": "node scripts/screenshots.js",
+    "docs:diagrams": "node scripts/render-diagrams.js",
+    "docs": "npm run docs:diagrams && npm run docs:shots"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
