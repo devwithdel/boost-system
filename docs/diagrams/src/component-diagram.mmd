@@ -1,0 +1,62 @@
+flowchart TB
+    subgraph Browser["Browser — one page per module"]
+        direction TB
+        HTML["Page shell<br/>dashboard / requests / quotations /<br/>orders / documents / bidding /<br/>reports / scanner / settings"]
+        Layout["layout.js<br/>nav, sidebar, bell, drawer,<br/>badges, BOOST.json()"]
+        Icons["icons.js<br/>inline SVG set"]
+        DT["datatable.js<br/>shared list: filters, sort,<br/>pagination, bulk actions"]
+        Pages["Per-page module script<br/>requests.js, bidding.js,<br/>reports.js, scanner.js…"]
+        Auth["login.js / reset.js<br/>public pages"]
+    end
+
+    subgraph Server["Node.js — single Express process, port 4000"]
+        direction TB
+        MW["Middleware chain<br/>helmet · cors · cookieParser ·<br/>express.json · /api logger + no-store"]
+        PG["middleware/auth.js<br/>readSession, requireAuth,<br/>requirePageAuth"]
+        subgraph Routers["Routers — one per domain"]
+            direction LR
+            RAuth["auth.js<br/>7 endpoints"]
+            RReq["requests.js<br/>7"]
+            RMod["modules.js<br/>7"]
+            RBid["bidding.js<br/>7"]
+            RRep["reports.js<br/>4"]
+            RDash["dashboard.js<br/>1"]
+            RAcc["account.js<br/>2"]
+            RNot["notifications.js<br/>1"]
+            RScan["scanner.js<br/>2"]
+        end
+        subgraph Services["Services"]
+            direction LR
+            SAct["activity.js<br/>audit trail"]
+            SMail["mailer.js<br/>password reset"]
+            SOcr["ocr.js<br/>tesseract worker"]
+        end
+        Static["express.static<br/>frontend/ + uploads/"]
+    end
+
+    subgraph Data["State"]
+        DB[("PostgreSQL<br/>10 tables")]
+        FS[["uploads/<br/>scans and attachments"]]
+        Lang[["langdata/<br/>eng.traineddata"]]
+    end
+
+    SMTP["SMTP server<br/>optional"]
+    Console["Server console<br/>fallback when no SMTP"]
+
+    HTML --> Layout
+    Layout --> Icons
+    Layout --> DT
+    Layout <--> Pages
+    DT --> Pages
+    HTML --> Auth
+
+    Layout & DT & Pages & Auth -.->|"fetch /api/*<br/>credentials: include"| MW
+    MW --> PG
+    PG --> Routers
+    Routers --> Services
+    Routers --> Static
+    Static --> FS
+    SOcr --> Lang
+    Routers & Services --> DB
+    SMail --> SMTP
+    SMail -.->|"no SMTP_HOST"| Console

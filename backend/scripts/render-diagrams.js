@@ -15,38 +15,23 @@ const path = require("path");
 const { launch, attach, screenshot, shutdown, sleep } = require("./lib/browser");
 
 const ROOT = path.join(__dirname, "..", "..");
-const SOURCE = path.join(ROOT, "docs", "architecture.md");
+const SOURCE_DIR = path.join(ROOT, "docs", "diagrams", "src");
 const OUT = path.join(ROOT, "docs", "diagrams");
 const PORT = 9223;
 
 const MERMAID_CDN = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
 
-/** Pull every ```mermaid block out, with the heading that introduces it. */
-function extractDiagrams(markdown) {
-  const lines = markdown.split(/\r?\n/);
-  const out = [];
-  let heading = "";
-  let inBlock = false;
-  let buf = [];
-
-  for (const line of lines) {
-    if (!inBlock) {
-      const h = /^#{1,6}\s+(.*)$/.exec(line);
-      if (h) heading = h[1].trim();
-      if (/^```mermaid\s*$/.test(line)) {
-        inBlock = true;
-        buf = [];
-      }
-      continue;
-    }
-    if (/^```\s*$/.test(line)) {
-      out.push({ heading, source: buf.join("\n") });
-      inBlock = false;
-      continue;
-    }
-    buf.push(line);
-  }
-  return out;
+/** Read the standalone Mermaid sources. */
+function extractDiagrams() {
+  const srcDir = path.join(ROOT, "docs", "diagrams", "src");
+  return fs
+    .readdirSync(srcDir)
+    .filter((f) => f.endsWith(".mmd"))
+    .map((f) => ({
+      name: f.replace(/\.mmd$/, ""),
+      heading: f.replace(/\.mmd$/, "").replace(/-/g, " "),
+      source: fs.readFileSync(path.join(srcDir, f), "utf8"),
+    }));
 }
 
 function slug(text) {
@@ -108,11 +93,11 @@ function page(source, title) {
 }
 
 (async () => {
-  if (!fs.existsSync(SOURCE)) throw new Error("missing " + SOURCE);
+  if (!fs.existsSync(SOURCE_DIR)) throw new Error("missing " + SOURCE_DIR);
   fs.mkdirSync(OUT, { recursive: true });
 
-  const diagrams = extractDiagrams(fs.readFileSync(SOURCE, "utf8"));
-  if (!diagrams.length) throw new Error("no mermaid blocks found in " + SOURCE);
+  const diagrams = extractDiagrams();
+  if (!diagrams.length) throw new Error("no .mmd sources found in " + SOURCE_DIR);
   console.log("Found " + diagrams.length + " diagram(s).");
 
   const browser = await launch({ port: PORT, width: 1800, height: 1200 });
@@ -123,7 +108,7 @@ function page(source, title) {
     cdp = await attach(PORT);
 
     for (const d of diagrams) {
-      const name = slug(d.heading);
+      const name = slug(d.name);
       await cdp.goto("about:blank");
       await cdp.goto("data:text/html;charset=utf-8," + encodeURIComponent(page(d.source, d.heading)));
 

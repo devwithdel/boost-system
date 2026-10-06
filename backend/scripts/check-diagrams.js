@@ -32,39 +32,27 @@ function read(rel) {
   return fs.readFileSync(path.join(ROOT, rel), "utf8");
 }
 
+// Prose (and the endpoint counts it quotes) comes from the document. The
+// diagrams themselves live as standalone .mmd files: GitHub's Mermaid renderer is
+// stricter than the one used here and dropped the fenced blocks, so architecture.md
+// embeds pre-rendered SVGs instead and the source sits beside them.
 const markdown = fs.readFileSync(DOC, "utf8");
+const MMD_DIR = path.join(ROOT, "docs", "diagrams", "src");
 
-/** Every mermaid block, with the heading above it. */
-function blocks() {
-  const lines = markdown.split(/\r?\n/);
-  const out = [];
-  let heading = "";
-  let inBlock = false;
-  let buf = [];
-  for (const line of lines) {
-    if (!inBlock) {
-      const h = /^#{1,6}\s+(.*)$/.exec(line);
-      if (h) heading = h[1].trim();
-      if (/^```mermaid\s*$/.test(line)) {
-        inBlock = true;
-        buf = [];
-      }
-      continue;
-    }
-    if (/^```\s*$/.test(line)) {
-      out.push({ heading, source: buf.join("\n") });
-      inBlock = false;
-      continue;
-    }
-    buf.push(line);
-  }
-  return out;
+function diagrams() {
+  return fs
+    .readdirSync(MMD_DIR)
+    .filter((f) => f.endsWith(".mmd"))
+    .map((f) => ({ name: f.replace(/\.mmd$/, ""), source: fs.readFileSync(path.join(MMD_DIR, f), "utf8") }));
 }
 
-const all = blocks();
-const classDiagram = all.find((b) => /classDiagram/.test(b.source));
-const erDiagram = all.find((b) => /erDiagram/.test(b.source));
-const flowcharts = all.filter((b) => /flowchart/.test(b.source));
+const all = diagrams();
+if (!all.length) {
+  console.error("No .mmd sources found in docs/diagrams/src");
+  process.exit(1);
+}
+const classDiagram = all.find((d) => /classDiagram/.test(d.source));
+const erDiagram = all.find((d) => /erDiagram/.test(d.source));
 
 // ---------------------------------------------------------------- services --
 // Class-diagram members for these must exist verbatim in their module.
@@ -140,10 +128,16 @@ for (const [cls, file] of Object.entries(ROUTER_FILES)) {
   check(`${cls} file exists`, fs.existsSync(path.join(ROOT, file)), file);
 }
 {
-  // The component diagram states endpoint counts next to each router name, e.g.
-  // `auth.js<br/><i>7 endpoints</i>`.
-  const claims = [...markdown.matchAll(/([a-z]+)\.js<br\/>\s*<i>(\d+)\s+endpoints?<\/i>/g)];
-  check("endpoint counts found in the component diagram", claims.length > 0, claims.length + " found");
+  // The component diagram states an endpoint count next to each router name, e.g.
+  // `auth.js<br/>7 endpoints` or `requests.js<br/>7`. Matched on the bare number
+  // so all nine routers are counted, not just the one that spells out "endpoints".
+  const component = all.find((d) => /flowchart/.test(d.source));
+  const claims = [...(component ? component.source : "").matchAll(/([a-z]+)\.js<br\/>\s*(\d+)/g)];
+  check(
+    "an endpoint count is documented for every router",
+    claims.length === Object.keys(ROUTER_FILES).length,
+    claims.length + " of " + Object.keys(ROUTER_FILES).length + " routers carry one"
+  );
   for (const [, name, count] of claims) {
     const entry = Object.entries(ROUTER_FILES).find(([, f]) => path.basename(f, ".js") === name);
     if (!entry) {

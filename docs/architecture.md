@@ -4,7 +4,12 @@ Diagrams of the system as it is actually built. Every relationship here was read
 out of the code — route mounts in `backend/server.js`, the tables in
 `backend/schema.sql`, the mounts in each `frontend/*.html`.
 
-All diagrams are Mermaid, so they render on GitHub and stay diff-able in review.
+Each diagram is authored as Mermaid in [`diagrams/src/`](diagrams/src) and rendered
+here to SVG. The Mermaid is kept as plain `.mmd` files rather than fenced blocks in
+this page because GitHub's Mermaid renderer is stricter than the one used to draw
+them — it dropped the HTML tags these diagrams use inside node labels — so the
+images are embedded instead and the source sits beside them. That also means each
+diagram can be pasted straight into Lucidchart's **Diagram as code** panel.
 
 ---
 
@@ -12,70 +17,9 @@ All diagrams are Mermaid, so they render on GitHub and stay diff-able in review.
 
 What the system is made of, and how the pieces depend on each other.
 
-```mermaid
-flowchart TB
-    subgraph Browser["Browser — one page per module"]
-        direction TB
-        HTML["Page shell<br/>dashboard / requests / quotations /<br/>orders / documents / bidding /<br/>reports / scanner / settings"]
-        Layout["layout.js<br/><i>nav, sidebar, bell, drawer,<br/>badges, BOOST.json()</i>"]
-        Icons["icons.js<br/><i>inline SVG set</i>"]
-        DT["datatable.js<br/><i>shared list: filters, sort,<br/>pagination, bulk actions</i>"]
-        Pages["Per-page module script<br/><i>requests.js, bidding.js,<br/>reports.js, scanner.js…</i>"]
-        Auth["login.js / reset.js<br/><i>public pages</i>"]
-    end
+![Component diagram](diagrams/component-diagram.svg)
 
-    subgraph Server["Node.js — single Express process, port 4000"]
-        direction TB
-        MW["Middleware chain<br/>helmet · cors · cookieParser ·<br/>express.json · /api logger + no-store"]
-        PG["middleware/auth.js<br/><i>readSession, requireAuth,<br/>requirePageAuth</i>"]
-        subgraph Routers["Routers — one per domain"]
-            direction LR
-            RAuth["auth.js<br/><i>7 endpoints</i>"]
-            RReq["requests.js<br/><i>7</i>"]
-            RMod["modules.js<br/><i>7</i>"]
-            RBid["bidding.js<br/><i>7</i>"]
-            RRep["reports.js<br/><i>4</i>"]
-            RDash["dashboard.js<br/><i>1</i>"]
-            RAcc["account.js<br/><i>2</i>"]
-            RNot["notifications.js<br/><i>1</i>"]
-            RScan["scanner.js<br/><i>2</i>"]
-        end
-        subgraph Services["Services"]
-            direction LR
-            SAct["activity.js<br/><i>audit trail</i>"]
-            SMail["mailer.js<br/><i>password reset</i>"]
-            SOcr["ocr.js<br/><i>tesseract worker</i>"]
-        end
-        Static["express.static<br/><i>frontend/ + uploads/</i>"]
-    end
-
-    subgraph Data["State"]
-        DB[("PostgreSQL<br/>10 tables")]
-        FS[["uploads/<br/><i>scans and attachments</i>"]]
-        Lang[["langdata/<br/><i>eng.traineddata</i>"]]
-    end
-
-    SMTP["SMTP server<br/><i>optional</i>"]
-    Console["Server console<br/><i>fallback when no SMTP</i>"]
-
-    HTML --> Layout
-    Layout --> Icons
-    Layout --> DT
-    Layout <--> Pages
-    DT --> Pages
-    HTML --> Auth
-
-    Layout & DT & Pages & Auth -.->|"fetch /api/*<br/>credentials: include"| MW
-    MW --> PG
-    PG --> Routers
-    Routers --> Services
-    Routers --> Static
-    Static --> FS
-    SOcr --> Lang
-    Routers & Services --> DB
-    SMail --> SMTP
-    SMail -.->|"no SMTP_HOST"| Console
-```
+<sub>Mermaid source: [diagrams/src/component-diagram.mmd](diagrams/src/component-diagram.mmd) &middot; also as [PNG](diagrams/component-diagram.png)</sub>
 
 ---
 
@@ -83,37 +27,9 @@ flowchart TB
 
 What has to exist for BOOST to run, and where each piece lives.
 
-```mermaid
-flowchart TB
-    User(("Procurement staff<br/><i>browser</i>"))
+![Deployment diagram](diagrams/deployment-diagram.svg)
 
-    subgraph Host["Single application host — Node 18+, no container required"]
-        direction TB
-        Proc["<b>BOOST process</b><br/>npm start / npm run dev<br/>HOST=0.0.0.0 · PORT=4000<br/><i>express, single instance</i>"]
-        Env[("backend/.env<br/><i>DATABASE_URL, JWT_SECRET,<br/>UPLOAD_DIR, SMTP_*</i>")]
-        Web["Static frontend<br/>frontend/*.html + css + js"]
-        Up[["backend/uploads/<br/><i>user files, gitignored</i>"]]
-        Lang[["backend/langdata/<br/><i>OCR model, gitignored</i>"]]
-        Node["node_modules<br/><i>express, pg, jsonwebtoken,<br/>bcrypt, tesseract.js,<br/>nodemailer, helmet</i>"]
-    end
-
-    Mail["SMTP relay<br/><i>password reset email</i>"]
-    DB[("<b>PostgreSQL</b><br/><i>users, procurement_requests,<br/>quotations, purchase_orders,<br/>documents, bids, bid_submissions,<br/>request_attachments,<br/>request_events, activity_log,<br/>password_reset_tokens</i>")]
-
-    User -->|"HTTPS :4000<br/><i>pages + JSON API</i>"| Proc
-    Proc --> Web
-    Proc --> Up
-    Proc --> Lang
-    Proc --> Node
-    Proc -->|"pg · DATABASE_URL<br/><i>pool, transactions</i>"| DB
-    Proc -.->|"only if SMTP_HOST set"| Mail
-    Env -.-> Proc
-
-    classDef store fill:#eef2ff,stroke:#4f46e5
-    classDef proc fill:#ecfdf5,stroke:#059669
-    class DB,Up,Lang,Env store
-    class Proc proc
-```
+<sub>Mermaid source: [diagrams/src/deployment-diagram.mmd](diagrams/src/deployment-diagram.mmd) &middot; also as [PNG](diagrams/deployment-diagram.png)</sub>
 
 ### Runtime notes
 
@@ -134,159 +50,9 @@ flowchart TB
 The backend's structural classes and their collaborators, as they are actually
 wired in `server.js`.
 
-```mermaid
-classDiagram
-    class ExpressApp {
-        -PORT : int
-        -HOST : string
-        -FRONTEND_DIR : string
-        +use(mw)
-        +listen(PORT, HOST)
-    }
+![Class diagram](diagrams/class-diagram.svg)
 
-    class AuthMiddleware {
-        +COOKIE_NAME : string
-        +readSession(req)
-        +optionalAuth(req, res, next)
-        +requireAuth(req, res, next)
-        +requirePageAuth(req, res, next)
-        +redirectIfAuthenticated(req, res, next)
-    }
-
-    class Router {
-        <<interface>>
-        +get(path, mw, handler)
-        +post(path, mw, handler)
-        +patch(path, mw, handler)
-    }
-
-    namespace Routers {
-        class AuthRouter {
-            +login()
-            +logout()
-            +forgotPassword()
-            +checkResetToken(token)
-            +resetPassword()
-            +me()
-            +sessionInfo()
-        }
-        class RequestsRouter {
-            +list()
-            +detail(id)
-            +create()
-            +changeStatus(id)
-            +bulkStatus()
-            +uploadAttachment(id)
-            +downloadAttachment(id, attachmentId)
-        }
-        class ModulesRouter {
-            +navCounts()
-            +listQuotations()
-            +listOrders()
-            +listDocuments()
-            +activity(entity, id)
-            +setQuotationStatus(id)
-            +setOrderStatus(id)
-        }
-        class BiddingRouter {
-            +listPackages()
-            +packageDetail(id)
-            +createPackage()
-            +setPackageStatus(id)
-            +addSubmission(id)
-            +awardSubmission(id, submissionId)
-            +analyticsSummary()
-        }
-        class ReportsRouter {
-            +spend()
-            +suppliers()
-            +cycleTimes()
-            +overview()
-        }
-        class DashboardRouter {
-            +overview()
-        }
-        class AccountRouter {
-            +summary()
-            +changePassword()
-        }
-        class NotificationsRouter {
-            +list()
-        }
-        class ScannerRouter {
-            +status()
-            +ocr()
-        }
-    }
-
-    namespace Services {
-        class ActivityLog {
-            +record(entityType, entityRef, action, actor)
-            +forEntity(entityType, entityRef)
-            +recent(limit)
-            +isEntityType(type)
-            +ENTITY_TYPES : Set
-        }
-        class Mailer {
-            +sendPasswordReset(to, name, resetUrl)
-            +smtpConfigured() : bool
-        }
-        class OcrEngine {
-            +recognizeBuffer(buffer)
-            +decodeImage(dataUrl)
-            +extractFields(text)
-            +detectKind(fields)
-            +isReady() : bool
-            +shutdown()
-        }
-    }
-
-    class AuthMiddleware {
-        +COOKIE_NAME : string
-        +readSession(req)
-        +optionalAuth(req, res, next)
-        +requireAuth(req, res, next)
-        +requirePageAuth(req, res, next)
-        +redirectIfAuthenticated(req, res, next)
-    }
-
-    class PgPool {
-        +query(text, values) : Promise
-        +connect()
-        +end()
-    }
-
-    ExpressApp --> AuthMiddleware : uses
-    ExpressApp --> Router : mounts
-
-    AuthRouter ..|> Router
-    RequestsRouter ..|> Router
-    ModulesRouter ..|> Router
-    BiddingRouter ..|> Router
-    ReportsRouter ..|> Router
-    DashboardRouter ..|> Router
-    AccountRouter ..|> Router
-    NotificationsRouter ..|> Router
-    ScannerRouter ..|> Router
-
-    RequestsRouter --> ActivityLog
-    BiddingRouter --> ActivityLog
-    ModulesRouter --> ActivityLog
-    AccountRouter --> ActivityLog
-    ScannerRouter --> OcrEngine
-    AuthRouter --> Mailer
-    AuthRouter --> ActivityLog
-
-    RequestsRouter --> PgPool
-    ModulesRouter --> PgPool
-    BiddingRouter --> PgPool
-    ReportsRouter --> PgPool
-    DashboardRouter --> PgPool
-    AccountRouter --> PgPool
-    NotificationsRouter --> PgPool
-    ScannerRouter --> PgPool
-    AuthRouter --> PgPool
-```
+<sub>Mermaid source: [diagrams/src/class-diagram.mmd](diagrams/src/class-diagram.mmd) &middot; also as [PNG](diagrams/class-diagram.png)</sub>
 
 ---
 
@@ -294,164 +60,9 @@ classDiagram
 
 Not requested, but a class diagram without it tends to get asked for next.
 
-```mermaid
-erDiagram
-    users {
-        int id PK
-        string full_name
-        string email UK
-        string username UK
-        string password_hash
-        string role
-        boolean is_active
-        int failed_attempts
-        datetime locked_until
-        datetime last_login_at
-        datetime created_at
-        datetime updated_at
-    }
+![Data model](diagrams/data-model.svg)
 
-    procurement_requests {
-        int id PK
-        string request_number UK
-        string requester_name
-        string department
-        string item_description
-        int quantity
-        numeric estimated_amount
-        string status
-        datetime requested_at
-        date due_date
-        int created_by FK
-        datetime created_at
-        datetime updated_at
-    }
-
-    quotations {
-        int id PK
-        string quotation_number UK
-        int request_id FK
-        string supplier_name
-        string item_description
-        numeric total_amount
-        string status
-        date valid_until
-        datetime created_at
-        datetime updated_at
-    }
-
-    purchase_orders {
-        int id PK
-        string order_number UK
-        int quotation_id FK
-        string supplier_name
-        numeric total_amount
-        string status
-        datetime ordered_at
-        date expected_delivery_date
-        datetime created_at
-        datetime updated_at
-    }
-
-    documents {
-        int id PK
-        string document_number UK
-        string title
-        string document_type
-        string file_name
-        int file_size_bytes
-        int uploaded_by FK
-        datetime uploaded_at
-        datetime created_at
-    }
-
-    request_attachments {
-        int id PK
-        int request_id FK
-        string file_name
-        string stored_name
-        string mime_type
-        int size_bytes
-        string source
-        int uploaded_by FK
-        datetime uploaded_at
-    }
-
-    bids {
-        int id PK
-        string bid_number UK
-        int request_id FK
-        string title
-        string status
-        datetime opened_at
-        datetime closed_at
-        string notes
-        int created_by FK
-        datetime created_at
-        datetime updated_at
-    }
-
-    bid_submissions {
-        int id PK
-        int bid_id FK
-        string supplier_name
-        numeric total_amount
-        string notes
-        string status
-        datetime submitted_at
-        datetime awarded_at
-    }
-
-    password_reset_tokens {
-        int id PK
-        int user_id FK
-        string token_hash UK
-        datetime expires_at
-        datetime used_at
-        string requested_ip
-        datetime created_at
-    }
-
-    request_events {
-        int id PK
-        int request_id FK
-        int actor_id FK
-        string actor_name
-        string action
-        string from_status
-        string to_status
-        string note
-        datetime created_at
-    }
-
-    activity_log {
-        int id PK
-        string entity_type
-        int entity_id
-        string entity_ref
-        string action
-        string from_status
-        string to_status
-        int actor_id FK
-        string actor_name
-        string note
-        datetime created_at
-    }
-
-    users ||--o{ procurement_requests : raises
-    users ||--o{ bids : creates
-    users ||--o{ documents : uploads
-    users ||--o{ request_attachments : uploads
-    users ||--o{ request_events : acts
-    users ||--o{ activity_log : acts
-    users ||--o{ password_reset_tokens : requests
-    procurement_requests ||--o{ quotations : "quoted by"
-    procurement_requests ||--o{ bids : "tendered as"
-    procurement_requests ||--o{ request_attachments : "has"
-    procurement_requests ||--o{ request_events : "audited by"
-    quotations ||--o{ purchase_orders : "becomes"
-    bids ||--|{ bid_submissions : "receives"
-```
+<sub>Mermaid source: [diagrams/src/data-model.mmd](diagrams/src/data-model.mmd) &middot; also as [PNG](diagrams/data-model.png)</sub>
 
 Two relationships that look obvious are deliberately **not** drawn, because the
 schema does not have them:
@@ -491,7 +102,7 @@ Module screenshots live alongside them in [`screenshots/`](screenshots/).
 
 ```bash
 cd backend
-npm run docs:diagrams   # re-render these diagrams from the Mermaid in this file
+npm run docs:diagrams   # re-render the images from diagrams/src/*.mmd
 npm run docs:shots      # re-capture the module screenshots
 npm run docs            # both
 ```
@@ -511,7 +122,8 @@ Lucidchart reads Mermaid directly, so nothing needs converting:
 
 1. Open a Lucidchart document.
 2. **Diagram as code** in the left toolbar (Individual, Team or Enterprise plans).
-3. **+ New Mermaid diagram**, paste the block from this file, **Generate**.
+3. **+ New Mermaid diagram**, paste the contents of the matching `.mmd` file,
+   **Generate**.
 
 All four types here are supported — Flowchart, Class and Entity Relationship.
 Two things to expect: the code must be in English, and once generated the diagram
@@ -527,8 +139,8 @@ npm run check:schema     # proves the schema builds from an empty database
 npm run check            # all three, plus the route sweep
 ```
 
-`check:diagrams` parses this file and compares it with the source: service and
-middleware members must exist, every route mount and endpoint count must match,
+`check:diagrams` parses the `.mmd` sources and compares them with the code: service
+and middleware members must exist, every route mount and endpoint count must match,
 every table and column in the data model must exist *and* nothing may be missing
 from it, and each dependency, env var and on-disk path named above must be real.
 

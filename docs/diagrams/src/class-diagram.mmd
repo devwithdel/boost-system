@@ -1,0 +1,151 @@
+classDiagram
+    class ExpressApp {
+        -PORT : int
+        -HOST : string
+        -FRONTEND_DIR : string
+        +use(mw)
+        +listen(PORT, HOST)
+    }
+
+    class AuthMiddleware {
+        +COOKIE_NAME : string
+        +readSession(req)
+        +optionalAuth(req, res, next)
+        +requireAuth(req, res, next)
+        +requirePageAuth(req, res, next)
+        +redirectIfAuthenticated(req, res, next)
+    }
+
+    class Router {
+        <<interface>>
+        +get(path, mw, handler)
+        +post(path, mw, handler)
+        +patch(path, mw, handler)
+    }
+
+    namespace Routers {
+        class AuthRouter {
+            +login()
+            +logout()
+            +forgotPassword()
+            +checkResetToken(token)
+            +resetPassword()
+            +me()
+            +sessionInfo()
+        }
+        class RequestsRouter {
+            +list()
+            +detail(id)
+            +create()
+            +changeStatus(id)
+            +bulkStatus()
+            +uploadAttachment(id)
+            +downloadAttachment(id, attachmentId)
+        }
+        class ModulesRouter {
+            +navCounts()
+            +listQuotations()
+            +listOrders()
+            +listDocuments()
+            +activity(entity, id)
+            +setQuotationStatus(id)
+            +setOrderStatus(id)
+        }
+        class BiddingRouter {
+            +listPackages()
+            +packageDetail(id)
+            +createPackage()
+            +setPackageStatus(id)
+            +addSubmission(id)
+            +awardSubmission(id, submissionId)
+            +analyticsSummary()
+        }
+        class ReportsRouter {
+            +spend()
+            +suppliers()
+            +cycleTimes()
+            +overview()
+        }
+        class DashboardRouter {
+            +overview()
+        }
+        class AccountRouter {
+            +summary()
+            +changePassword()
+        }
+        class NotificationsRouter {
+            +list()
+        }
+        class ScannerRouter {
+            +status()
+            +ocr()
+        }
+    }
+
+    namespace Services {
+        class ActivityLog {
+            +record(entityType, entityRef, action, actor)
+            +forEntity(entityType, entityRef)
+            +recent(limit)
+            +isEntityType(type)
+            +ENTITY_TYPES : Set
+        }
+        class Mailer {
+            +sendPasswordReset(to, name, resetUrl)
+            +smtpConfigured() : bool
+        }
+        class OcrEngine {
+            +recognizeBuffer(buffer)
+            +decodeImage(dataUrl)
+            +extractFields(text)
+            +detectKind(fields)
+            +isReady() : bool
+            +shutdown()
+        }
+    }
+
+    class AuthMiddleware {
+        +COOKIE_NAME : string
+        +readSession(req)
+        +optionalAuth(req, res, next)
+        +requireAuth(req, res, next)
+        +requirePageAuth(req, res, next)
+        +redirectIfAuthenticated(req, res, next)
+    }
+
+    class PgPool {
+        +query(text, values) : Promise
+        +connect()
+        +end()
+    }
+
+    ExpressApp --> AuthMiddleware : uses
+    ExpressApp --> Router : mounts
+
+    AuthRouter ..|> Router
+    RequestsRouter ..|> Router
+    ModulesRouter ..|> Router
+    BiddingRouter ..|> Router
+    ReportsRouter ..|> Router
+    DashboardRouter ..|> Router
+    AccountRouter ..|> Router
+    NotificationsRouter ..|> Router
+    ScannerRouter ..|> Router
+
+    RequestsRouter --> ActivityLog
+    BiddingRouter --> ActivityLog
+    ModulesRouter --> ActivityLog
+    AccountRouter --> ActivityLog
+    ScannerRouter --> OcrEngine
+    AuthRouter --> Mailer
+    AuthRouter --> ActivityLog
+
+    RequestsRouter --> PgPool
+    ModulesRouter --> PgPool
+    BiddingRouter --> PgPool
+    ReportsRouter --> PgPool
+    DashboardRouter --> PgPool
+    AccountRouter --> PgPool
+    NotificationsRouter --> PgPool
+    ScannerRouter --> PgPool
+    AuthRouter --> PgPool

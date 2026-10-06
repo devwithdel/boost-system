@@ -1,0 +1,29 @@
+flowchart TB
+    User(("Procurement staff<br/>browser"))
+
+    subgraph Host["Single application host — Node 18+, no container required"]
+        direction TB
+        Proc["BOOST process<br/>npm start / npm run dev<br/>HOST=0.0.0.0 · PORT=4000<br/>express, single instance"]
+        Env[("backend/.env<br/>DATABASE_URL, JWT_SECRET,<br/>UPLOAD_DIR, SMTP_*")]
+        Web["Static frontend<br/>frontend/*.html + css + js"]
+        Up[["backend/uploads/<br/>user files, gitignored"]]
+        Lang[["backend/langdata/<br/>OCR model, gitignored"]]
+        Node["node_modules<br/>express, pg, jsonwebtoken,<br/>bcrypt, tesseract.js,<br/>nodemailer, helmet"]
+    end
+
+    Mail["SMTP relay<br/>password reset email"]
+    DB[("PostgreSQL<br/>users, procurement_requests,<br/>quotations, purchase_orders,<br/>documents, bids, bid_submissions,<br/>request_attachments,<br/>request_events, activity_log,<br/>password_reset_tokens")]
+
+    User -->|"HTTPS :4000<br/>pages + JSON API"| Proc
+    Proc --> Web
+    Proc --> Up
+    Proc --> Lang
+    Proc --> Node
+    Proc -->|"pg · DATABASE_URL<br/>pool, transactions"| DB
+    Proc -.->|"only if SMTP_HOST set"| Mail
+    Env -.-> Proc
+
+    classDef store fill:#eef2ff,stroke:#4f46e5
+    classDef proc fill:#ecfdf5,stroke:#059669
+    class DB,Up,Lang,Env store
+    class Proc proc

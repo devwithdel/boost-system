@@ -1,0 +1,156 @@
+erDiagram
+    users {
+        int id PK
+        string full_name
+        string email UK
+        string username UK
+        string password_hash
+        string role
+        boolean is_active
+        int failed_attempts
+        datetime locked_until
+        datetime last_login_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    procurement_requests {
+        int id PK
+        string request_number UK
+        string requester_name
+        string department
+        string item_description
+        int quantity
+        numeric estimated_amount
+        string status
+        datetime requested_at
+        date due_date
+        int created_by FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    quotations {
+        int id PK
+        string quotation_number UK
+        int request_id FK
+        string supplier_name
+        string item_description
+        numeric total_amount
+        string status
+        date valid_until
+        datetime created_at
+        datetime updated_at
+    }
+
+    purchase_orders {
+        int id PK
+        string order_number UK
+        int quotation_id FK
+        string supplier_name
+        numeric total_amount
+        string status
+        datetime ordered_at
+        date expected_delivery_date
+        datetime created_at
+        datetime updated_at
+    }
+
+    documents {
+        int id PK
+        string document_number UK
+        string title
+        string document_type
+        string file_name
+        int file_size_bytes
+        int uploaded_by FK
+        datetime uploaded_at
+        datetime created_at
+    }
+
+    request_attachments {
+        int id PK
+        int request_id FK
+        string file_name
+        string stored_name
+        string mime_type
+        int size_bytes
+        string source
+        int uploaded_by FK
+        datetime uploaded_at
+    }
+
+    bids {
+        int id PK
+        string bid_number UK
+        int request_id FK
+        string title
+        string status
+        datetime opened_at
+        datetime closed_at
+        string notes
+        int created_by FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    bid_submissions {
+        int id PK
+        int bid_id FK
+        string supplier_name
+        numeric total_amount
+        string notes
+        string status
+        datetime submitted_at
+        datetime awarded_at
+    }
+
+    password_reset_tokens {
+        int id PK
+        int user_id FK
+        string token_hash UK
+        datetime expires_at
+        datetime used_at
+        string requested_ip
+        datetime created_at
+    }
+
+    request_events {
+        int id PK
+        int request_id FK
+        int actor_id FK
+        string actor_name
+        string action
+        string from_status
+        string to_status
+        string note
+        datetime created_at
+    }
+
+    activity_log {
+        int id PK
+        string entity_type
+        int entity_id
+        string entity_ref
+        string action
+        string from_status
+        string to_status
+        int actor_id FK
+        string actor_name
+        string note
+        datetime created_at
+    }
+
+    users ||--o{ procurement_requests : raises
+    users ||--o{ bids : creates
+    users ||--o{ documents : uploads
+    users ||--o{ request_attachments : uploads
+    users ||--o{ request_events : acts
+    users ||--o{ activity_log : acts
+    users ||--o{ password_reset_tokens : requests
+    procurement_requests ||--o{ quotations : "quoted by"
+    procurement_requests ||--o{ bids : "tendered as"
+    procurement_requests ||--o{ request_attachments : "has"
+    procurement_requests ||--o{ request_events : "audited by"
+    quotations ||--o{ purchase_orders : "becomes"
+    bids ||--|{ bid_submissions : "receives"
