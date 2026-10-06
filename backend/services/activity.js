@@ -9,7 +9,7 @@ const pool = require("../db");
  * must roll back together with it.
  */
 
-const ENTITY_TYPES = ["request", "quotation", "order", "document"];
+const ENTITY_TYPES = ["request", "quotation", "order", "document", "bid"];
 
 function isEntityType(value) {
   return ENTITY_TYPES.indexOf(value) !== -1;
@@ -19,10 +19,10 @@ function isEntityType(value) {
  * Record one event.
  *
  * @param {object}  entry
- * @param {string}  entry.entity      request | quotation | order | document
+ * @param {string}  entry.entity      request | quotation | order | document | bid
  * @param {number}  entry.entityId
  * @param {string} [entry.ref]         human label shown in the trail
- * @param {string}  entry.action      created | status_change | bulk_status | …
+ * @param {string}  entry.action      created | status_change | awarded | …
  * @param {string} [entry.from]       previous status
  * @param {string} [entry.to]         new status
  * @param {object} [entry.actor]      { sub, fullName }

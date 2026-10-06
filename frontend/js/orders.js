@@ -48,13 +48,7 @@
       onRowClick: openOrder,
       filters: [
         { id: "q", type: "search", placeholder: "Search order or supplier…" },
-        {
-          id: "status",
-          type: "select",
-          options: ["", "pending", "approved", "shipped", "delivered", "cancelled"].map(function (s) {
-            return { value: s, label: s ? BOOST.label(s) : "All statuses" };
-          }),
-        },
+        BOOST.statusFilter(["pending", "approved", "shipped", "delivered", "cancelled"]),
       ],
       columns: [
         {

@@ -16,6 +16,16 @@
     );
   }
 
+  // Percentage of an estimate saved by awarding below it. Only meaningful when
+  // there is an estimate to compare against, hence the guard.
+  function savingPct(estimated, awarded) {
+    var est = Number(estimated);
+    var won = Number(awarded);
+    if (!est || !won || won > est) return "";
+    var pct = Math.round(((est - won) / est) * 100);
+    return pct > 0 ? pct + "% below estimate" : "";
+  }
+
   // onRowClick(id, element, row) — the record comes with the click.
   function openQuotation(id, el, row) {
     if (!row) return;
@@ -31,6 +41,13 @@
           ["Status", BOOST.badge(row.status)],
           ["Supplier", BOOST.esc(row.supplierName)],
           ["Value", BOOST.fmtMoney(row.totalAmount)],
+          [
+            "Against estimate",
+            row.estimatedAmount
+              ? BOOST.fmtMoney(row.estimatedAmount) +
+                (savingPct(row.estimatedAmount, row.totalAmount) ? " · " + savingPct(row.estimatedAmount, row.totalAmount) : "")
+              : "No linked request",
+          ],
           ["Valid until", BOOST.fmtDate(row.validUntil)],
           ["Raised", BOOST.fmtDate(row.createdAt)],
           ["Linked request", row.requestNumber ? BOOST.esc(row.requestNumber) : "Not linked"],
@@ -49,13 +66,7 @@
       onRowClick: openQuotation,
       filters: [
         { id: "q", type: "search", placeholder: "Search number, supplier, item…" },
-        {
-          id: "status",
-          type: "select",
-          options: ["", "draft", "active", "awarded", "expired", "cancelled"].map(function (s) {
-            return { value: s, label: s ? BOOST.label(s) : "All statuses" };
-          }),
-        },
+        BOOST.statusFilter(["draft", "active", "awarded", "expired", "cancelled"]),
       ],
       columns: [
         {

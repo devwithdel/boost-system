@@ -7,14 +7,19 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 
 const authRoutes = require("./routes/auth");
+const accountRoutes = require("./routes/account");
+const biddingRoutes = require("./routes/bidding");
 const dashboardRoutes = require("./routes/dashboard");
 const moduleRoutes = require("./routes/modules");
 const notificationRoutes = require("./routes/notifications");
+const reportRoutes = require("./routes/reports");
 const requestRoutes = require("./routes/requests");
 const scannerRoutes = require("./routes/scanner");
 const { optionalAuth, requirePageAuth, redirectIfAuthenticated } = require("./middleware/auth");
 
 const app = express();
+// PORT is read before the handlers below because the bind-failure message
+// quotes the port it tried.
 const PORT = process.env.PORT || 4000;
 const HOST = process.env.HOST || "0.0.0.0";
 const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
@@ -24,6 +29,26 @@ const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
 // procurement offline for everyone. Log it loudly and keep serving; the
 // supervisor restarts only if the process truly dies.
 process.on("uncaughtException", (err) => {
+  // A failure to bind is not a request-time fault, so "keep serving" is a lie:
+  // the process stays alive, never listens, and every route returns a
+  // connection error with nothing obviously wrong on screen. Fail loudly
+  // instead, so the second copy of the server exits and the first one is
+  // visibly the one holding the port.
+  if (err && (err.code === "EADDRINUSE" || err.code === "EACCES")) {
+    console.error(
+      `\n[STARTUP FAILED] ${err.code === "EADDRINUSE" ? "Port " + PORT + " is already in use." : "Not permitted to bind port " + PORT + "."}\n` +
+        `Another copy of BOOST is almost certainly already running. Stop it, or start this one on a different port:\n` +
+        `  ${
+          err.code === "EADDRINUSE"
+            ? "  PowerShell:  Get-NetTCPConnection -State Listen -LocalPort " + PORT + " | Select-Object OwningProcess\n" +
+              "               Stop-Process -Id (Get-NetTCPConnection -State Listen -LocalPort " + PORT + ").OwningProcess\n"
+            : ""
+        }` +
+        `  Other port:   $env:PORT=4001; npm run dev\n`
+    );
+    process.exit(1);
+  }
+
   console.error("UNCAUGHT EXCEPTION (server continues):", (err && err.stack) || err);
 });
 process.on("unhandledRejection", (reason) => {
@@ -103,6 +128,9 @@ app.use("/api/modules", requestRoutes);
 app.use("/api/modules", moduleRoutes);
 app.use("/api/scanner", scannerRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api", accountRoutes);
+app.use("/api", biddingRoutes);
+app.use("/api", reportRoutes);
 
 // Short aliases so module pages can call /api/requests directly.
 // requests.js is mounted first so it owns every /api/requests* path.
@@ -130,6 +158,26 @@ app.get("/login", redirectIfAuthenticated, (req, res) => {
 
 app.get("/login.html", redirectIfAuthenticated, (req, res) => {
   return sendPage(res, "login.html");
+});
+
+// Password recovery. /forgot-password is public like the sign-in page;
+// /reset-password carries a single-use token, so it stays reachable even when a
+// stale session cookie is still in the browser (the reset signs the user in
+// again at the end).
+app.get("/forgot-password", redirectIfAuthenticated, (req, res) => {
+  return sendPage(res, "forgot-password.html");
+});
+
+app.get("/forgot-password.html", redirectIfAuthenticated, (req, res) => {
+  return sendPage(res, "forgot-password.html");
+});
+
+app.get("/reset-password", (req, res) => {
+  return sendPage(res, "reset-password.html");
+});
+
+app.get("/reset-password.html", (req, res) => {
+  return sendPage(res, "reset-password.html");
 });
 
 app.get("/dashboard", requirePageAuth, (req, res) => {

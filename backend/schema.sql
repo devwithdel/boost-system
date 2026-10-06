@@ -22,6 +22,71 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Bidding Records: one package per procurement opportunity, holding the
+-- competing supplier submissions and the award decision. A package hangs off
+-- the request that triggered it, so a won bid can be traced back to the need
+-- that caused it.
+CREATE TABLE IF NOT EXISTS bids (
+  id           SERIAL PRIMARY KEY,
+  bid_number   VARCHAR(30) NOT NULL UNIQUE,
+  request_id   INTEGER REFERENCES procurement_requests(id) ON DELETE SET NULL,
+  title        VARCHAR(200) NOT NULL,
+  status       VARCHAR(20) NOT NULL DEFAULT 'draft'
+                 CHECK (status IN ('draft','open','closed','awarded','cancelled')),
+  opened_at    TIMESTAMPTZ,
+  closed_at    TIMESTAMPTZ,
+  notes        TEXT,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- One row per competing supplier inside a package. Only one submission per
+-- package may be 'awarded', enforced by the partial unique index below.
+CREATE TABLE IF NOT EXISTS bid_submissions (
+  id            SERIAL PRIMARY KEY,
+  bid_id        INTEGER NOT NULL REFERENCES bids(id) ON DELETE CASCADE,
+  supplier_name VARCHAR(150) NOT NULL,
+  total_amount  NUMERIC(12, 2) NOT NULL CHECK (total_amount >= 0),
+  notes         TEXT,
+  status        VARCHAR(20) NOT NULL DEFAULT 'submitted'
+                  CHECK (status IN ('submitted','awarded','rejected','withdrawn')),
+  submitted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  awarded_at    TIMESTAMPTZ,
+  UNIQUE (bid_id, supplier_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bids_request ON bids (request_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bids_status ON bids (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bid_submissions_bid ON bid_submissions (bid_id, total_amount);
+CREATE INDEX IF NOT EXISTS idx_bid_submissions_supplier ON bid_submissions (supplier_name);
+
+-- A package can have exactly one winning submission, never two. The partial
+-- index is what makes that true at the database level rather than trusting
+-- every code path to remember the rule.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bid_single_award
+  ON bid_submissions (bid_id) WHERE status = 'awarded';
+
+-- Bidding needs its own trail entries, so the audit table has to know about it.
+ALTER TABLE activity_log DROP CONSTRAINT IF EXISTS activity_log_entity_type_check;
+ALTER TABLE activity_log ADD CONSTRAINT activity_log_entity_type_check
+  CHECK (entity_type IN ('request','quotation','order','document','bid'));
+
+-- One-time password reset links. Only the SHA-256 hash of the token is
+-- stored, so a leaked table (or a server log) cannot be turned into a working
+-- reset link; a row is spent (used_at) or expired after 30 minutes.
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash  TEXT NOT NULL UNIQUE,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used_at     TIMESTAMPTZ,
+  requested_ip VARCHAR(45),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens (user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS procurement_requests (
   id                SERIAL PRIMARY KEY,
   request_number    VARCHAR(30) NOT NULL UNIQUE,

@@ -16,8 +16,19 @@ const { execFileSync } = require("child_process");
 const path = require("path");
 const pool = require("../db");
 
-// Children first: attachments and the trail reference requests.
-const TABLES = ["request_attachments", "activity_log", "documents", "purchase_orders", "quotations", "procurement_requests"];
+// Children first: attachments and the trail reference requests, and bid
+// submissions reference their package. activity_log has no foreign keys, so it
+// is cleared explicitly rather than relying on a cascade that cannot happen.
+const TABLES = [
+  "request_attachments",
+  "bid_submissions",
+  "activity_log",
+  "documents",
+  "purchase_orders",
+  "quotations",
+  "bids",
+  "procurement_requests",
+];
 
 async function reset() {
   if (process.env.NODE_ENV === "production") {

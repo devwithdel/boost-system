@@ -190,7 +190,18 @@ router.get("/requests", requireAuth, async (req, res) => {
     ];
     const args = [status, department, q];
 
-    const [rowsResult, countResult, deptResult] = await Promise.all([
+    // How many of each status sit behind the current department and search,
+    // with the status filter deliberately left out. Counting under the active
+    // status would report 0 for every other option the moment you picked one,
+    // which makes the filter useless for moving between statuses.
+    // Placeholders restart at $1: an unreferenced parameter has no type for
+    // Postgres to infer, so passing the status through would fail outright.
+    const facetWhere = [
+      "($1 = '' OR department = $1)",
+      "(LOWER(request_number) LIKE $2 OR LOWER(item_description) LIKE $2 OR LOWER(requester_name) LIKE $2 OR LOWER(department) LIKE $2)",
+    ];
+
+    const [rowsResult, countResult, deptResult, statusResult] = await Promise.all([
       pool.query(
         `SELECT id, request_number AS "requestNumber", requester_name AS "requesterName",
                 department, item_description AS description, quantity,
@@ -207,6 +218,13 @@ router.get("/requests", requireAuth, async (req, res) => {
         args
       ),
       pool.query(`SELECT DISTINCT department FROM procurement_requests ORDER BY department`),
+      pool.query(
+        `SELECT status, COUNT(*)::int AS n
+         FROM procurement_requests
+         WHERE ${facetWhere.join(" AND ")}
+         GROUP BY status`,
+        [args[1], args[2]]
+      ),
     ]);
 
     const total = countResult.rows[0].total;
@@ -219,6 +237,7 @@ router.get("/requests", requireAuth, async (req, res) => {
       sort: str(req, "sort") || "requestedAt",
       dir: String(str(req, "dir")).toLowerCase() === "asc" ? "asc" : "desc",
       departments: deptResult.rows.map((r) => r.department),
+      statusCounts: Object.fromEntries(statusResult.rows.map((r) => [r.status, r.n])),
     });
   } catch (err) {
     console.error("Requests list error:", err);

@@ -15,7 +15,9 @@
       bulkActions: [
         { value: "approved", label: "Approve selected" },
         { value: "completed", label: "Mark completed" },
-        { value: "cancelled", label: "Cancel…", requiresNote: true },
+        // Spelled out rather than "Cancel…": the ellipsis read as clipped text,
+        // and a bare "Cancel" next to the row's Clear button was ambiguous.
+        { value: "cancelled", label: "Cancel selected", requiresNote: true },
       ],
       onRowClick: openRequest,
       // In the filter bar rather than a floating button: on a phone the FAB
@@ -26,13 +28,7 @@
         "<em>Scan document</em></a>",
       filters: [
         { id: "q", type: "search", placeholder: "Search number, item, requester…" },
-        {
-          id: "status",
-          type: "select",
-          options: STATUSES.map(function (s) {
-            return { value: s, label: s ? BOOST.label(s) : "All statuses" };
-          }),
-        },
+        BOOST.statusFilter(STATUSES),
         {
           id: "department",
           type: "select",

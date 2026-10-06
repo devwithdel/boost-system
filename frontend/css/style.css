@@ -34,47 +34,69 @@ body {
   padding: 24px;
 }
 
+/* Brand lockup + card travel together so the page stays centred as one
+   block when the card grows with its content. */
+.signin-shell {
+  width: 100%;
+  max-width: 430px;
+}
+
 .auth-card {
   width: 100%;
-  max-width: 420px;
 }
 
 .signin-panel {
   background: var(--card-bg);
   border-radius: 16px;
   box-shadow: 0 4px 24px rgba(27, 36, 64, 0.08);
-  padding: 40px 36px;
+  padding: 34px 32px 38px;
 }
 
 .signin-inner {
   width: 100%;
 }
 
+/* Brand lockup: the palette-coloured wordmark plus the descriptor set in
+   type. Stacked because the mark and its descriptor read as one block. */
 .brand-panel {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  margin-bottom: 20px;
+  gap: 10px;
+  margin-bottom: 26px;
 }
 
+/* The wordmark keeps its palette colours here. The dashboard sidebar inverts
+   the same file to white for the navy background, which a white card cannot. */
 .brand-logo {
-  width: 100%;
-  max-width: 180px;
+  width: auto;
+  max-width: 210px;
   height: auto;
 }
 
-.welcome {
-  margin: 0 0 6px;
-  font-size: 22px;
+/* Set in type to match the descriptor under the official lockup. */
+.brand-tagline {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.signin-title {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.2;
   font-weight: 700;
   color: var(--text-heading);
   text-align: center;
 }
 
-.subheading {
-  margin: 0 0 28px;
-  font-size: 13px;
-  font-weight: 500;
+.signin-subtitle {
+  margin: 8px 0 26px;
+  font-size: 14px;
   color: var(--text-muted);
   text-align: center;
 }
@@ -158,17 +180,153 @@ body {
 }
 
 .form-error {
-  margin: -6px 0 14px;
+  margin: 14px 0 0;
   font-size: 13px;
   color: var(--error);
   text-align: center;
 }
 
+.form-note {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: #f7f8fc;
+  color: var(--text-label);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* A visible message needs breathing room before the button underneath it. */
+.form-error:not([hidden]),
+.form-note:not([hidden]) {
+  margin-bottom: 18px;
+}
+
+.note-line {
+  display: block;
+}
+
+.note-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--blue-accent);
+  font-weight: 600;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.note-link:hover {
+  text-decoration: underline;
+}
+
+/* "Back to sign in" / "Request a new link" under the form on the
+   recovery pages. */
+.auth-alt {
+  margin: 20px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.auth-alt a {
+  color: var(--blue-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.auth-alt a:hover {
+  text-decoration: underline;
+}
+
+/* Live password checklist. A rule turns green the moment it is satisfied, so
+   a rejected submit is never a mystery. */
+.pw-rules {
+  margin: -4px 0 18px;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.pw-rules li {
+  position: relative;
+  padding-left: 22px;
+  margin-bottom: 4px;
+  transition: color 0.15s ease;
+}
+
+/* Ring that fills in when the rule is met. */
+.pw-rules li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-light);
+  border-radius: 50%;
+  background: var(--card-bg);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.pw-rules li.ok {
+  color: #17805a;
+}
+
+.pw-rules li.ok::before {
+  border-color: #17805a;
+  background: #17805a;
+}
+
+/* Tick drawn over the ring with a mask-free background-coloured border. */
+.pw-rules li.ok::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 5px;
+  width: 5px;
+  height: 3px;
+  border-left: 2px solid #ffffff;
+  border-bottom: 2px solid #ffffff;
+  transform: rotate(-45deg);
+}
+
+/* Remember-me on the left, password reset on the right — one row so the
+   eye of the layout is the sign-in button below. */
+.signin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-label);
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--blue-accent);
+  cursor: pointer;
+}
+
 .btn-signin {
   width: 100%;
-  padding: 12px 14px;
+  padding: 13px 14px;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--blue-accent);
   color: #ffffff;
   font-size: 15px;
@@ -189,12 +347,11 @@ body {
 }
 
 .forgot-link {
-  display: block;
-  margin-top: 16px;
-  text-align: center;
   font-size: 13px;
+  font-weight: 600;
   color: var(--blue-accent);
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .forgot-link:hover {
@@ -204,7 +361,11 @@ body {
 /* Tablet and below: tighten card padding slightly */
 @media (max-width: 720px) {
   .signin-panel {
-    padding: 32px 28px;
+    padding: 30px 26px 32px;
+  }
+
+  .brand-panel {
+    margin-bottom: 20px;
   }
 }
 
@@ -217,21 +378,32 @@ body {
     padding-top: 64px;
   }
 
-  .auth-card {
+  .auth-card,
+  .signin-shell {
     max-width: 100%;
   }
 
   .signin-panel {
-    padding: 28px 22px;
+    padding: 28px 22px 30px;
     border-radius: 14px;
   }
 
   .brand-logo {
-    max-width: 150px;
+    max-width: 175px;
   }
 
-  .welcome {
-    font-size: 20px;
+  .brand-tagline {
+    font-size: 9.5px;
+    letter-spacing: 0.07em;
+  }
+
+  .signin-title {
+    font-size: 23px;
+  }
+
+  .signin-subtitle {
+    font-size: 13.5px;
+    margin-bottom: 22px;
   }
 
   /* 16px+ inputs stop iOS Safari auto-zooming on focus, which otherwise
@@ -249,14 +421,19 @@ body {
   }
 
   .signin-panel {
-    padding: 24px 20px;
+    padding: 24px 20px 26px;
   }
 
   .brand-panel {
-    margin-bottom: 12px;
+    gap: 6px;
+    margin-bottom: 14px;
   }
 
-  .subheading {
+  .signin-title {
+    font-size: 21px;
+  }
+
+  .signin-subtitle {
     margin-bottom: 18px;
   }
 }

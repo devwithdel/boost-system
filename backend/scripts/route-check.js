@@ -14,6 +14,9 @@ require("dotenv").config();
 const BASE = "http://localhost:4000";
 const results = [];
 let cookie = "";
+// Bid numbers this sweep created, so cleanup removes exactly those and leaves
+// the seeded demo packages alone.
+const createdBidRefs = [];
 
 function record(ok, name, detail) {
   results.push({ ok, name, detail: detail === undefined ? "" : String(detail) });
@@ -23,12 +26,27 @@ async function call(method, path, { body, raw, auth = true, redirect = "manual" 
   const headers = {};
   if (auth && cookie) headers.Cookie = cookie;
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(BASE + path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    redirect,
-  });
+
+  // One retry on a transport error. Node's fetch pools connections and the
+  // server closes idle ones after 5s, so a pooled socket can be dead by the
+  // time a long request (the multi-second OCR call) reuses it. That surfaces
+  // as "fetch failed" even though the server is healthy.
+  let res;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await fetch(BASE + path, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        redirect,
+      });
+      break;
+    } catch (err) {
+      if (attempt >= 2) throw err;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
+
   let payload = null;
   const type = res.headers.get("content-type") || "";
   if (!raw && type.includes("application/json")) payload = await res.json().catch(() => null);
@@ -71,6 +89,8 @@ async function unauthenticated() {
   const protectedApis = [
     ["GET", "/api/auth/me"],
     ["GET", "/api/auth/session-info"],
+    ["GET", "/api/account/summary"],
+    ["POST", "/api/account/change-password"],
     ["GET", "/api/dashboard"],
     ["GET", "/api/nav-counts"],
     ["GET", "/api/requests"],
@@ -89,6 +109,17 @@ async function unauthenticated() {
     ["GET", "/api/scanner/status"],
     ["POST", "/api/scanner/ocr"],
     ["GET", "/api/notifications"],
+    ["GET", "/api/bids"],
+    ["GET", "/api/bids/1"],
+    ["GET", "/api/bids/analytics/summary"],
+    ["POST", "/api/bids"],
+    ["POST", "/api/bids/1/status"],
+    ["POST", "/api/bids/1/submissions"],
+    ["POST", "/api/bids/1/submissions/1/status"],
+    ["GET", "/api/reports/overview"],
+    ["GET", "/api/reports/spend"],
+    ["GET", "/api/reports/suppliers"],
+    ["GET", "/api/reports/cycle-times"],
   ];
   for (const [method, path] of protectedApis) {
     const res = await call(method, path, { body: method === "GET" ? undefined : {}, auth: false });
@@ -108,6 +139,11 @@ async function unauthenticated() {
   const root = await call("GET", "/", { auth: false, raw: true });
   // Root deliberately serves the login page itself rather than redirecting.
   check("GET / serves the login page when signed out", root.status === 200, `status ${root.status}`);
+
+  for (const p of ["/forgot-password", "/reset-password"]) {
+    const res = await call("GET", p, { auth: false, raw: true });
+    check(`GET ${p} is reachable when signed out`, res.status === 200, "status " + res.status);
+  }
 
   const unknownApi = await call("GET", "/api/does-not-exist", { auth: false });
   check("GET /api/does-not-exist returns JSON 404", unknownApi.status === 404 && !!unknownApi.body, "status " + unknownApi.status);
@@ -150,6 +186,347 @@ async function loginRaw() {
   return res.status;
 }
 
+/* Which script defines each shared BOOST.* helper. A page that calls a helper
+   without loading its script fails at runtime with "BOOST.x is not a function"
+   and nothing else — the bidding list shipped that way because bidding.html
+   never loaded datatable.js. This reads the pages off disk and asserts the
+   dependency is actually present. */
+const HELPER_SCRIPTS = {
+  dataTable: "datatable.js",
+  icon: "icons.js",
+  mount: "layout.js",
+  moduleDrawer: "layout.js",
+  statusFilter: "layout.js",
+  toast: "layout.js",
+};
+
+async function scriptDependencies() {
+  console.log("\n### Page script dependencies");
+  const fs = require("fs");
+  const path = require("path");
+  const dir = path.join(__dirname, "..", "..", "frontend");
+
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".html"))) {
+    const html = fs.readFileSync(path.join(dir, file), "utf8");
+    const loaded = [...html.matchAll(/\/js\/([a-z]+\.js)/g)].map((m) => m[1]);
+
+    // Every module script on the page, minus the shared ones that provide the
+    // helpers we are checking for.
+    const modules = loaded.filter((s) => !Object.values(HELPER_SCRIPTS).includes(s));
+
+    for (const mod of modules) {
+      const modPath = path.join(dir, "js", mod);
+      if (!fs.existsSync(modPath)) continue;
+      const source = fs.readFileSync(modPath, "utf8");
+      const used = [...new Set([...source.matchAll(/BOOST\.([a-zA-Z]+)/g)].map((m) => m[1]))];
+
+      for (const helper of used) {
+        const provider = HELPER_SCRIPTS[helper];
+        if (!provider) continue; // defined by the page's own module
+        check(
+          `${file} loads ${provider} for BOOST.${helper} (used by ${mod})`,
+          loaded.includes(provider),
+          loaded.length ? "loaded: " + loaded.join(", ") : "no scripts loaded"
+        );
+      }
+    }
+  }
+}
+
+/* `hidden` only means `display: none` in the UA stylesheet, so any author rule
+   that sets `display` silently beats it. An element toggled with `.hidden` from
+   JS and given a `display` in app.css stays on screen — which is how an empty
+   orange circle ended up stranded on the bell and on every sidebar item. This
+   walks the JS for hidden-toggled selectors and fails if the CSS gives any of
+   them a `display` without a matching `[hidden]` override. */
+function hiddenVisibility() {
+  console.log("\n### hidden vs. display");
+  const fs = require("fs");
+  const path = require("path");
+  const frontend = path.join(__dirname, "..", "..", "frontend");
+  // Comments are stripped first: a comment that spells out a rule (as the note
+  // above the [hidden] overrides does) parses as a selector/body pair and
+  // reports perfectly good CSS as unguarded.
+  const css = fs.readFileSync(path.join(frontend, "css", "app.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+  // Normalise a selector down to the tokens a CSS rule could also target.
+  // Attribute selectors are mapped to their class name too, because this
+  // codebase pairs them (`[data-nav-badge]` in JS, `.nav-badge` in CSS).
+  function tokens(sel) {
+    const out = new Set();
+    for (const m of sel.matchAll(/\[([a-z-]+)/g)) {
+      out.add(m[1]);
+      if (m[1].startsWith("data-")) out.add(m[1].slice(5));
+    }
+    for (const m of sel.matchAll(/([#.])([A-Za-z0-9_-]+)/g)) out.add(m[2]);
+    return out;
+  }
+
+  // Which selectors does the frontend ever toggle with `.hidden`?
+  const hidden = new Set();
+  for (const file of fs.readdirSync(path.join(frontend, "js")).filter((f) => f.endsWith(".js"))) {
+    const src = fs.readFileSync(path.join(frontend, "js", file), "utf8");
+
+    // `var badge = document.getElementById("x")` ... later `badge.hidden = ...`
+    for (const m of src.matchAll(/(?:var|let|const)?\s*(\w+)\s*=\s*document\.(?:getElementById|querySelector|querySelectorAll)\(\s*["'`]([^"'`]+)/g)) {
+      if (new RegExp(`\\b${m[1]}\\.hidden\\s*=`).test(src)) tokens(m[2]).forEach((t) => hidden.add(t));
+    }
+    // `.forEach(function (el) { ... el.hidden = ... })` over a selector
+    for (const m of src.matchAll(/querySelectorAll\(\s*["'`]([^"'`]+)["'`][^)]*\)\.forEach\(function\s*\(\s*(\w+)\s*\)/g)) {
+      if (new RegExp(`\\b${m[2]}\\.hidden\\s*=`).test(src)) tokens(m[1]).forEach((t) => hidden.add(t));
+    }
+  }
+
+  for (const t of hidden) {
+    // Every rule that gives this token a display, and whether any one of them
+    // is the [hidden] override. One guard is enough: a token often has several
+    // display rules (a shared selector group, a responsive variant) and each of
+    // those does not need its own twin.
+    const displayRules = [];
+    let guarded = false;
+    for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!/display\s*:/.test(m[2])) continue;
+      const selectors = m[1].split(",").map((s) => s.trim());
+      const hit = selectors.filter((s) => tokens(s).has(t));
+      if (!hit.length) continue;
+      displayRules.push(hit.join(", "));
+      if (selectors.some((s) => s.includes("[hidden]"))) guarded = true;
+    }
+    check(
+      `hidden-toggled .${t} is not given a display without a [hidden] override`,
+      displayRules.length === 0 || guarded,
+      !displayRules.length
+        ? "no display rule, nothing to override"
+        : guarded
+          ? displayRules.length + " display rule(s), [hidden] override present"
+          : "no [hidden] override for: " + displayRules.join(" | ")
+    );
+  }
+
+  check("hidden/display sweep found candidates to inspect", hidden.size > 0, hidden.size + " target(s)");
+}
+
+/* Every module page used to ship an empty <body> plus render-blocking scripts.
+   With nothing to paint, the browser kept the outgoing page on screen until all
+   the JS had run enough to build the shell — so switching modules flashed the
+   previous module, its table, and its sidebar footer. Pages must now paint a
+   skeleton immediately and load their scripts deferred. */
+function bootSkeleton() {
+  console.log("\n### Page boot skeleton");
+  const fs = require("fs");
+  const path = require("path");
+  const dir = path.join(__dirname, "..", "..", "frontend");
+
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".html"))) {
+    const html = fs.readFileSync(path.join(dir, file), "utf8");
+    const scripts = [...html.matchAll(/<script([^>]*)>/g)].map((m) => m[1]);
+
+    if (!scripts.length) continue;
+
+    const blocking = scripts.filter((attrs) => !/\bdefer\b/.test(attrs));
+    check(`${file} loads no render-blocking script`, blocking.length === 0, blocking.length + " without defer");
+
+    // The auth pages have real markup of their own; only the app shell needs a
+    // stand-in, and those are the ones carrying data-page.
+    const isAppPage = /<body[^>]*\bdata-page=/.test(html);
+    if (!isAppPage) continue;
+
+    const body = (html.match(/<body[^>]*>([\s\S]*?)<\/body>/) || [, ""])[1];
+    const hasShell = /class="app"/.test(body);
+    const hasSpinner = /class="spinner"/.test(body);
+    check(
+      `${file} paints a boot skeleton before the scripts run`,
+      hasShell && hasSpinner,
+      `shell=${hasShell} spinner=${hasSpinner}`
+    );
+  }
+}
+
+/* Every list endpoint returns paging metadata plus one array of records under a
+   resource name, plus sometimes an array of filter facets. The shared data table
+   finds the records by shape; if an endpoint's payload stops matching that
+   shape the list silently renders "Nothing to show" with no error anywhere.
+   This mirrors the rule in js/datatable.js and asserts each endpoint still
+   satisfies it. */
+const LIST_ENDPOINTS = [
+  "/api/requests?limit=5",
+  "/api/quotations?limit=5",
+  "/api/orders?limit=5",
+  "/api/documents?limit=5",
+  "/api/bids?limit=5",
+];
+
+// Of those, the ones whose table has a status filter. /api/documents filters by
+// document type, so it has no status facet to return.
+const STATUS_LIST_ENDPOINTS = ["/api/requests", "/api/quotations", "/api/orders", "/api/bids"];
+
+const FACET_KEYS = ["types", "departments", "facets", "options", "distribution"];
+
+function rowsFrom(data) {
+  if (!data || typeof data !== "object") return [];
+  if (Array.isArray(data.rows)) return data.rows;
+  for (const key of Object.keys(data)) {
+    if (FACET_KEYS.includes(key)) continue;
+    const value = data[key];
+    if (Array.isArray(value) && (!value.length || typeof value[0] === "object")) return value;
+  }
+  return [];
+}
+
+async function listShapes() {
+  console.log("\n### List payload shapes (shared data table contract)");
+
+  for (const path of LIST_ENDPOINTS) {
+    const res = await call("GET", path);
+    const rows = rowsFrom(res.body);
+    // total is the pager's count; rows is what actually gets drawn.
+    check(
+      `${path} exposes its records where the data table can find them`,
+      res.status === 200 && rows.length > 0 && rows.length === Math.min(5, res.body.total),
+      "status " + res.status + " found " + rows.length + " row(s), total " + (res.body ? res.body.total : "-")
+    );
+
+    /* The status filter labels carry per-status counts. They have to come from
+       a facet that ignores the status filter itself, otherwise picking one
+       status would report 0 for all the others and the filter could not be used
+       to move between them. */
+    if (!STATUS_LIST_ENDPOINTS.includes(path.replace(/\?.*$/, ""))) continue;
+
+    const counts = res.body && res.body.statusCounts;
+    // The key must always be there. Keys inside it only when the table has rows —
+    // an empty quotations table legitimately counts nothing.
+    const hasKeys = counts && Object.keys(counts).length > 0;
+    check(
+      `${path} returns statusCounts for the filter labels`,
+      res.status === 200 && !!counts && typeof counts === "object" && (!res.body.total || hasKeys),
+      counts ? Object.keys(counts).map((k) => k + "=" + counts[k]).join(", ") || "(empty, table has no rows)" : "no statusCounts"
+    );
+
+    const someStatus = counts && Object.keys(counts)[0];
+    if (someStatus) {
+      const filtered = await call("GET", path + "?status=" + encodeURIComponent(someStatus));
+      const same =
+        filtered.body &&
+        filtered.body.statusCounts &&
+        JSON.stringify(filtered.body.statusCounts) === JSON.stringify(counts);
+      check(
+        `${path} keeps every status in statusCounts when one is filtered on`,
+        same,
+        filtered.body && filtered.body.statusCounts
+          ? Object.keys(filtered.body.statusCounts).map((k) => k + "=" + filtered.body.statusCounts[k]).join(", ")
+          : "missing"
+      );
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 2b. Password reset                                                   */
+/* ------------------------------------------------------------------ */
+/**
+ * The checks that do not touch a password always run. The round trip that
+ * actually resets the seed account and then puts the original password back is
+ * opt-in, because a crash halfway through would leave the QA account holding a
+ * throwaway password:
+ *
+ *   QA_RESET_PASSWORD=1 npm run check:routes
+ *
+ * It also needs the server to hand the reset link back, which it only does
+ * outside production when there is no SMTP server to send it by.
+ */
+async function passwordReset() {
+  console.log("\n### Password reset");
+
+  // The three reset endpoints share one 10-per-15-minutes budget and this phase
+  // spends six of them, so a second run inside the window starts getting 429s
+  // partway through. Each call goes through limited(): the first 429 stops the
+  // phase and is reported once, rather than surfacing as several unrelated
+  // failures. The login phase handles its limiter the same way.
+  let budgetSpent = false;
+  const limited = (res) => {
+    if (res.status !== 429) return false;
+    if (!budgetSpent) {
+      budgetSpent = true;
+      check("reset rate limiter engaged (limit 10 / 15 min)", true, "HTTP 429 — restart the server before re-running");
+    }
+    return true;
+  };
+
+  const noEmail = await call("POST", "/api/auth/forgot-password", { body: {}, auth: false });
+  if (limited(noEmail)) return;
+  check("forgot-password without an address is rejected", noEmail.status === 400, "status " + noEmail.status);
+
+  // An unknown address must be indistinguishable from a known one.
+  const unknown = await call("POST", "/api/auth/forgot-password", {
+    body: { email: "nobody@example.invalid" },
+    auth: false,
+  });
+  if (limited(unknown)) return;
+  check("forgot-password for an unknown address returns the generic reply", unknown.status === 200 && !!unknown.body?.message, "status " + unknown.status);
+
+  const known = await call("POST", "/api/auth/forgot-password", { body: { email: process.env.SEED_EMAIL }, auth: false });
+  if (limited(known)) return;
+  const sameReply = JSON.stringify(unknown.body?.message) === JSON.stringify(known.body?.message);
+  check("forgot-password reply does not reveal whether the account exists", known.status === 200 && sameReply, JSON.stringify(known.body));
+
+  const badToken = await call("GET", "/api/auth/reset-password/not-a-real-token", { auth: false });
+  if (limited(badToken)) return;
+  check("GET reset-password with a bad token is rejected", badToken.status === 400 && badToken.body?.valid === false, "status " + badToken.status);
+
+  const weak = await call("POST", "/api/auth/reset-password", { body: { token: "not-a-real-token", password: "short" }, auth: false });
+  if (limited(weak)) return;
+  check("reset-password rejects a weak password", weak.status === 400, "status " + weak.status + " " + JSON.stringify(weak.body));
+
+  const noSuchToken = await call("POST", "/api/auth/reset-password", { body: { token: "not-a-real-token", password: "Str0ngEnough1" }, auth: false });
+  if (limited(noSuchToken)) return;
+  check("reset-password with an unknown token is rejected", noSuchToken.status === 400, "status " + noSuchToken.status);
+
+  if (!process.env.QA_RESET_PASSWORD) {
+    check("reset round trip skipped (set QA_RESET_PASSWORD=1 to include it)", true, "not run");
+    return;
+  }
+
+  if (!known.body?.resetUrl) {
+    check("reset round trip ran", false, "server did not return a reset link — configure SMTP or run outside production");
+    return;
+  }
+
+  const token = new URL(known.body.resetUrl).searchParams.get("token");
+  const original = process.env.SEED_PASSWORD;
+  const temp = "QaTemp12345";
+
+  const valid = await call("GET", `/api/auth/reset-password/${encodeURIComponent(token)}`, { auth: false });
+  check("reset link validates", valid.status === 200 && valid.body?.valid === true, "status " + valid.status);
+
+  const samePassword = await call("POST", "/api/auth/reset-password", { body: { token, password: original }, auth: false });
+  check("reset refuses the password already in use", samePassword.status === 400, "status " + samePassword.status);
+
+  let changed = false;
+  try {
+    const done = await call("POST", "/api/auth/reset-password", { body: { token, password: temp }, auth: false });
+    check("reset-password sets a new password", done.status === 200 && !!done.body?.user, "status " + done.status + " " + JSON.stringify(done.body));
+    changed = done.status === 200;
+
+    const reuse = await call("POST", "/api/auth/reset-password", { body: { token, password: temp }, auth: false });
+    check("reset link cannot be used twice", reuse.status === 400, "status " + reuse.status);
+  } finally {
+    // Always put the seed password back, however the run ended.
+    if (changed) {
+      const again = await call("POST", "/api/auth/forgot-password", { body: { email: process.env.SEED_EMAIL }, auth: false });
+      const restoreToken = again.body?.resetUrl ? new URL(again.body.resetUrl).searchParams.get("token") : null;
+      if (restoreToken) {
+        const back = await call("POST", "/api/auth/reset-password", { body: { token: restoreToken, password: original }, auth: false });
+        check("seed password restored after the round trip", back.status === 200, "status " + back.status);
+      } else {
+        check("seed password restored after the round trip", false, "no second reset link — set the password by hand");
+      }
+    }
+  }
+
+  const reLogin = await call("POST", "/api/auth/login", { body: { identifier: process.env.SEED_EMAIL, password: original }, auth: false });
+  check("seed password still signs in after the round trip", reLogin.status === 200, "status " + reLogin.status);
+}
+
 /* ------------------------------------------------------------------ */
 /* 3. Authenticated reads                                               */
 /* ------------------------------------------------------------------ */
@@ -169,8 +546,130 @@ async function reads() {
   const nav = await call("GET", "/api/nav-counts");
   check("GET /api/nav-counts", nav.status === 200 && typeof nav.body.requests === "number", "status " + nav.status);
 
+  // Account self-service
+  const summary = await call("GET", "/api/account/summary");
+  check(
+    "GET /api/account/summary returns counts",
+    summary.status === 200 && typeof summary.body.requestsRaised === "number" && typeof summary.body.actionsLogged === "number",
+    "status " + summary.status
+  );
+
+  // Change-password guardrails. These are all rejected before the hash is
+  // touched, so the seed password is never changed and the run stays repeatable.
+  const noCurrent = await call("POST", "/api/account/change-password", { body: { newPassword: "Str0ngEnough1" } });
+  check("change-password requires the current password", noCurrent.status === 400, "status " + noCurrent.status);
+
+  const weakPw = await call("POST", "/api/account/change-password", {
+    body: { currentPassword: process.env.SEED_PASSWORD, newPassword: "short" },
+  });
+  check("change-password rejects a weak new password", weakPw.status === 400, "status " + weakPw.status + " " + JSON.stringify(weakPw.body));
+
+  const noLetter = await call("POST", "/api/account/change-password", {
+    body: { currentPassword: process.env.SEED_PASSWORD, newPassword: "1234567890" },
+  });
+  check("change-password requires a letter", noLetter.status === 400, "status " + noLetter.status);
+
+  const samePw = await call("POST", "/api/account/change-password", {
+    body: { currentPassword: process.env.SEED_PASSWORD, newPassword: process.env.SEED_PASSWORD },
+  });
+  check("change-password refuses the password already in use", samePw.status === 400, "status " + samePw.status);
+
+  const wrongCurrent = await call("POST", "/api/account/change-password", {
+    body: { currentPassword: "definitely-not-the-password", newPassword: "Str0ngEnough1" },
+  });
+  check("change-password rejects a wrong current password", wrongCurrent.status === 401, "status " + wrongCurrent.status);
+
   const notif = await call("GET", "/api/notifications");
   check("GET /api/notifications", notif.status === 200 && Array.isArray(notif.body.items), "status " + notif.status + " items " + (notif.body ? notif.body.items.length : "-"));
+
+  // Bidding Records
+  const bids = await call("GET", "/api/bids");
+  check(
+    "GET /api/bids list carries the aggregates the row shows",
+    bids.status === 200 &&
+      Array.isArray(bids.body.bids) &&
+      bids.body.bids.every((b) => "submissionCount" in b && "lowestBid" in b && "awardedValue" in b),
+    "status " + bids.status + " rows " + (bids.body ? bids.body.bids.length : "-")
+  );
+
+  if (bids.status === 200 && bids.body.bids.length) {
+    const one = bids.body.bids[0];
+    const detail = await call("GET", "/api/bids/" + one.id);
+    check(
+      "GET /api/bids/:id returns submissions and history",
+      detail.status === 200 && Array.isArray(detail.body.submissions) && Array.isArray(detail.body.events) && Array.isArray(detail.body.allowedNext),
+      "status " + detail.status
+    );
+
+    const badSort = await call("GET", "/api/bids?sort=" + encodeURIComponent(";DROP TABLE bids;--"));
+    check("GET /api/bids ignores an injected sort key", badSort.status === 200, "status " + badSort.status);
+
+    const filtered = await call("GET", "/api/bids?status=open");
+    check("GET /api/bids status filter", filtered.status === 200 && filtered.body.bids.every((b) => b.status === "open"), "status " + filtered.status);
+
+    const bySupplier = await call("GET", "/api/bids?supplier=zzzznomatch");
+    check("GET /api/bids supplier filter returns nothing when unmatched", bySupplier.status === 200 && bySupplier.body.total === 0, "total " + (bySupplier.body ? bySupplier.body.total : "-"));
+  }
+
+  // Creating a package: validation, auto-numbering and the draft-only rule.
+  const noTitle = await call("POST", "/api/bids", { body: { title: "   " } });
+  check("POST /api/bids rejects a blank title", noTitle.status === 400, "status " + noTitle.status);
+
+  const badLink = await call("POST", "/api/bids", { body: { title: "QA link check", requestId: 99999999 } });
+  check("POST /api/bids rejects a request that does not exist", badLink.status === 404, "status " + badLink.status);
+
+  const made = await call("POST", "/api/bids", { body: { title: "QA route sweep package" } });
+  check(
+    "POST /api/bids creates a numbered draft",
+    made.status === 201 && /^BID-\d{4}-\d{3}/.test(made.body?.bid?.bidNumber || "") && made.body.bid.status === "draft",
+    "status " + made.status + " " + (made.body?.bid?.bidNumber || JSON.stringify(made.body))
+  );
+
+  if (made.status === 201) {
+    const newId = made.body.bid.id;
+    createdBidRefs.push(made.body.bid.bidNumber);
+
+    // A draft accepts no offers until it is opened.
+    const early = await call("POST", `/api/bids/${newId}/submissions`, { body: { supplierName: "QA Supplier", totalAmount: 1000 } });
+    check("a draft package accepts no supplier offers", early.status === 409, "status " + early.status);
+
+    const opened = await call("POST", `/api/bids/${newId}/status`, { body: { status: "open" } });
+    check("POST /api/bids/:id/status opens a draft", opened.status === 200 && opened.body.record.status === "open", "status " + opened.status);
+
+    const badAward = await call("POST", `/api/bids/${newId}/status`, { body: { status: "awarded" } });
+    check("a package cannot be awarded with no winner named", badAward.status === 409, "status " + badAward.status);
+
+    const offered = await call("POST", `/api/bids/${newId}/submissions`, { body: { supplierName: "QA Supplier", totalAmount: 1000 } });
+    check("an open package accepts a supplier offer", offered.status === 201, "status " + offered.status);
+
+    const dupe = await call("POST", `/api/bids/${newId}/submissions`, { body: { supplierName: "QA Supplier", totalAmount: 500 } });
+    check("the same supplier cannot bid twice on one package", dupe.status === 409, "status " + dupe.status);
+
+    const trail = await call("GET", `/api/activity?entity=bid&id=${newId}`);
+    const actions = (trail.body?.events || []).map((e) => e.action);
+    check(
+      "a new package records created, open and submission in the trail",
+      actions.includes("created") && actions.includes("status_change") && actions.includes("submission_received"),
+      actions.join(",")
+    );
+  }
+
+  const bidSummary = await call("GET", "/api/bids/analytics/summary");
+  check(
+    "GET /api/bids/analytics/summary returns named keys",
+    bidSummary.status === 200 && typeof bidSummary.body.awardedValue === "number" && typeof bidSummary.body.openPackages === "number",
+    "status " + bidSummary.status + " keys " + (bidSummary.body ? Object.keys(bidSummary.body).join(",") : "-")
+  );
+
+  // Reports
+  for (const path of ["/api/reports/overview", "/api/reports/spend", "/api/reports/suppliers", "/api/reports/cycle-times"]) {
+    const res = await call("GET", path);
+    check(`GET ${path}`, res.status === 200 && !!res.body, "status " + res.status);
+  }
+
+  // An unknown group must fall back rather than reaching SQL as a column name.
+  const badGroup = await call("GET", "/api/reports/spend?group=" + encodeURIComponent(";DROP TABLE bids;--"));
+  check("spend report falls back on an unknown group", badGroup.status === 200 && badGroup.body.group === "month", "group " + (badGroup.body ? badGroup.body.group : "-"));
 
   const reqs = await call("GET", "/api/requests?page=1&limit=5");
   check("GET /api/requests list", reqs.status === 200 && Array.isArray(reqs.body.requests), "status " + reqs.status + " rows " + (reqs.body ? reqs.body.requests.length : "-"));
@@ -450,6 +949,17 @@ async function cleanup() {
     check("QA test requests removed", true, res.rows.length + " row(s): " + res.rows.map((r) => r.request_number).join(","));
   } catch (err) {
     check("QA test requests removed", false, err.message);
+  }
+
+  // Only the numbers this sweep created are removed. A LIKE 'BID-%' wildcard
+  // would also delete the seeded demo packages, which later phases read back.
+  // activity_log has no foreign keys, so its rows are cleared by hand too.
+  try {
+    await pool.query("DELETE FROM activity_log WHERE entity_type = 'bid' AND entity_ref = ANY($1)", [createdBidRefs]);
+    await pool.query("DELETE FROM bids WHERE bid_number = ANY($1)", [createdBidRefs]);
+    check("QA bid packages removed", true, createdBidRefs.length + " package(s)");
+  } catch (err) {
+    check("QA bid packages removed", false, err.message);
   } finally {
     await pool.end();
   }
@@ -458,8 +968,13 @@ async function cleanup() {
 (async () => {
   try {
     await unauthenticated();
+    await scriptDependencies();
+    bootSkeleton();
+    hiddenVisibility();
+    await passwordReset();
     const authed = await authentication();
     if (authed) {
+      await listShapes();
       await reads();
       await writes();
       await scanner();

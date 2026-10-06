@@ -27,6 +27,9 @@
   --orange: #f5a623;
   --violet: #7b5cf0;
   --red: #d9455f;
+  /* Was referenced by .btn.danger but never defined, so the declaration was
+     dropped and cancel buttons rendered as bare red text with no fill. */
+  --red-soft: #ffeef1;
   --shadow: 0 1px 2px rgba(16, 26, 60, 0.04), 0 4px 14px rgba(16, 26, 60, 0.05);
   --radius: 8px;
 }
@@ -83,20 +86,30 @@ a { color: inherit; text-decoration: none; }
   min-width: 0;
 }
 
+/* Shown only in the mobile drawer (see the 860px block below).
+   flex:0 0 auto + align-self:center pin the box square no matter what the
+   flex parent does — without them the button stretches into a tall pill
+   whenever .sidebar-head aligns to stretch. align-items/justify-content
+   centre the glyph, so the icon must stay a flex container. */
 .drawer-close {
   display: none;
+  flex: 0 0 auto;
+  align-self: center;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  margin: 14px 12px 0 0;
+  width: 44px;
+  height: 44px;
+  margin: 10px 12px 0 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 9px;
   color: var(--nav-text);
   background: rgba(255, 255, 255, 0.06);
   cursor: pointer;
 }
-.drawer-close:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.drawer-close:hover { color: #fff; background: rgba(255, 255, 255, 0.14); }
+.drawer-close:active { background: rgba(255, 255, 255, 0.2); }
+/* The glyph must not inherit flex sizing, or it stretches with the button. */
+.drawer-close .ico { display: block; flex: none; }
 
 .sidebar-brand img {
   display: block;
@@ -335,6 +348,14 @@ a { color: inherit; text-decoration: none; }
 /* Nothing new to read, but work is waiting: a quiet dot, no number. */
 .bell-count.is-dot { min-width: 9px; width: 9px; height: 9px; padding: 0; top: 5px; right: 4px; }
 
+/* `hidden` is only `display: none` in the UA stylesheet, so ANY author rule that
+   sets `display` beats it and the element stays on screen. These three are
+   toggled with `.hidden` from JS *and* given a display value here, which left an
+   empty orange circle behind on the bell and on every sidebar item. */
+.bell-count[hidden] { display: none; }
+.nav-badge[hidden] { display: none; }
+.field-flag[hidden] { display: none; }
+
 .bell-panel {
   position: absolute;
   top: calc(100% + 8px);
@@ -500,6 +521,34 @@ a { color: inherit; text-decoration: none; }
 .greet-chip b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .greet-chip.is-clear { color: var(--green); }
 
+/* Refresh control in the greeting banner. Quiet by default: the figures are
+   at most a minute old, so this only has to look alive when you use it. */
+.greet-refresh {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+.greet-refresh:hover { color: var(--blue); background: var(--blue-soft); }
+.greet-refresh:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.greet-refresh .ico { flex: 0 0 auto; }
+.greet-refresh.is-busy { color: var(--blue); }
+.greet-refresh.is-busy .ico { animation: spin 0.9s linear infinite; }
+/* The stamp is the first thing to go when the banner runs out of room. */
+.greet-refresh span { white-space: nowrap; }
+
 /* KPI cards */
 .kpi-grid {
   display: grid;
@@ -638,13 +687,275 @@ a { color: inherit; text-decoration: none; }
 .chart-legend .sw.won { background: #6fa2f7; }
 .chart-legend .sw.value { background: var(--amber); }
 
-.donut-wrap { display: grid; place-items: center; padding: 6px 0 14px; }
-.donut { width: 176px; height: 176px; transform: rotate(-90deg); }
-.donut circle { fill: none; stroke-width: 22; }
-.donut-legend { display: grid; gap: 9px; }
-.donut-legend div { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-.donut-legend i { width: 10px; height: 10px; border-radius: 50%; }
-.donut-legend b { margin-left: auto; color: var(--muted); font-weight: 600; }
+/* ---------- donut ---------- */
+
+/* The ring scales with the card instead of a fixed pixel size, so it stops
+   looking lost in a wide panel. The svg carries the viewBox and scales; the
+   centre label is a sibling, not inside the rotated group. */
+.donut-wrap { padding: 4px 0 16px; }
+.donut-figure { position: relative; width: min(220px, 100%); margin: 0 auto; }
+.donut { display: block; width: 100%; height: auto; }
+.donut circle { fill: none; stroke-width: 21; }
+
+/* A segment lifts slightly on hover so the ring is not inert. */
+.donut-seg { transition: opacity 0.15s ease, stroke-width 0.15s ease; cursor: default; }
+.donut-figure:hover .donut-seg { opacity: 0.45; }
+.donut-seg:hover { opacity: 1 !important; stroke-width: 25; }
+
+.donut-centre {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 1px;
+  text-align: center;
+  pointer-events: none;
+}
+.donut-centre b { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.donut-centre span { color: var(--muted); font-size: 11.5px; }
+
+/* Legend rows carry the count as well as the share, and a bar that repeats the
+   proportion. Four equal 25% slices are indistinguishable by angle alone. */
+.donut-legend { display: grid; gap: 12px; }
+.donut-key {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 12.5px;
+}
+.donut-key > i { width: 10px; height: 10px; border-radius: 3px; }
+.donut-key-label { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.donut-key-count { color: var(--ink); font-variant-numeric: tabular-nums; }
+.donut-key-pct { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+.donut-key-bar {
+  grid-column: 2 / -1;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+.donut-key-bar > i { display: block; height: 100%; border-radius: 999px; }
+
+/* ---------- bidding ---------- */
+
+/* "Lowest" tag on the cheapest supplier offer in the drawer table. */
+.tag-low {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e8f7f0;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+
+/* The awarded row is the one decision this module records, so it is the only
+   highlighted row in the table. */
+.dt-table tr.row-won { background: #f2fbf7; }
+.dt-table tr.row-won td { font-weight: 600; }
+
+.sub-table { margin-top: 2px; }
+
+.muted-note { color: var(--muted); font-size: 12.5px; font-weight: 400; }
+
+/* Savings against the estimate: green when money was saved, amber when the
+   award came in above it. */
+.delta { display: block; margin-top: 2px; font-size: 11px; font-weight: 600; }
+.delta.is-good { color: var(--green); }
+.delta.is-over { color: var(--amber); }
+
+/* Per-submission actions in the drawer. */
+.sub-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sub-actions .btn { padding: 5px 11px; font-size: 12px; }
+
+.sub-form { display: grid; gap: 10px; margin-top: 4px; }
+.sub-form label { display: grid; gap: 4px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.sub-form select {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 400;
+  outline: none;
+}
+.sub-form select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(30, 86, 200, 0.12); }
+.sub-form input {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  font-weight: 400;
+  color: var(--ink);
+  background: #fff;
+  outline: none;
+}
+.sub-form input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(30, 86, 200, 0.12); }
+.sub-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.sub-form .btn { justify-self: start; }
+
+/* ---------- reports ---------- */
+
+.report-shell { padding-bottom: 6px; }
+.report-head { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+
+/* Export buttons. Held on the same line as the period picker so the report's
+   controls read as one group. */
+.report-actions { display: flex; gap: 8px; }
+
+/* Tabs read as a filter over one report, not as navigation, so they stay
+   inside the card rather than becoming a second top-level nav. */
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.tab {
+  padding: 7px 13px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+.tab:hover { background: var(--line-soft); color: var(--ink); }
+.tab.is-active { background: var(--blue-soft); color: var(--blue); }
+.tab:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+.period { display: grid; gap: 4px; margin-left: auto; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+
+/* Group-by switcher inside the report head. */
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--line-soft); }
+.seg-btn {
+  padding: 5px 11px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.seg-btn:hover { color: var(--ink); }
+.seg-btn.is-active { background: #fff; color: var(--blue); box-shadow: 0 1px 2px rgba(16, 26, 60, 0.08); }
+.seg-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+/* Report headline figures reuse the fact grid, with room for a third line. */
+.report-facts { margin-bottom: 18px; }
+.stat-value { font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
+.stat-sub { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; }
+
+.report-sub {
+  margin: 22px 0 10px;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.report-note {
+  margin: 12px 0 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* Supplier bar column: wide enough to read the shape without pushing the
+   numbers off the row. */
+.sup-bar { width: 110px; }
+
+/* ---------- printing ---------- */
+
+/* Document header. Hidden on screen, where the page already says what it is;
+   this exists so a saved PDF or a sheet of paper identifies itself the moment
+   it leaves the browser. */
+.print-head { display: none; }
+
+@media print {
+  /* Keep background colours and borders: without this Chrome drops them and the
+     report prints as flat black text on white with no table structure. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html, body {
+    background: #fff !important;
+    font-size: 11pt;
+  }
+
+  /* Page chrome is navigation, not content. */
+  .sidebar,
+  .topbar,
+  .scrim,
+  .toasts,
+  .drawer-layer,
+  .fab,
+  .skip-link,
+  .tabs,
+  .period,
+  .seg,
+  .filter-actions,
+  .dt-pager,
+  .dt-bulk,
+  .greet-refresh,
+  .btn,
+  .report-actions {
+    display: none !important;
+  }
+
+  .app,
+  .main {
+    display: block !important;
+  }
+
+  .content { padding: 0 !important; }
+  .stack { display: block !important; }
+
+  .card,
+  .kpi {
+    box-shadow: none !important;
+    border: 1px solid #d8dce8 !important;
+    margin-bottom: 12pt;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Long tables may span pages; their header row repeats on each one. */
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+
+  .table-scroll { overflow: visible !important; }
+  .dt-table { font-size: 9.5pt; }
+
+  .print-head {
+    display: block !important;
+    margin-bottom: 14pt;
+    padding-bottom: 8pt;
+    border-bottom: 2px solid #1e56c8;
+  }
+  .print-head img { height: 26px; width: auto; }
+  .print-head h1 {
+    margin: 6pt 0 2pt;
+    font-size: 16pt;
+    color: #16203c;
+  }
+  .print-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4pt 16pt;
+    color: #4b5673;
+    font-size: 9pt;
+  }
+
+  /* Bars are sized in percentages that assume a viewport; give the chart a
+     floor so it cannot collapse to nothing on paper. */
+  .chart-area { min-height: 120pt; }
+}
 
 /* pipeline */
 .pipeline { display: grid; gap: 14px; }
@@ -986,8 +1297,15 @@ tbody tr:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .drawer-body { flex: 1; overflow-y: auto; padding: 18px; }
 
 .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.fact span { display: block; margin-bottom: 3px; color: var(--muted); font-size: 11px; font-weight: 600; }
-.fact div { font-size: 13px; font-weight: 600; }
+/* Scoped to the direct child on purpose. As a bare descendant selector this
+   also caught the status badge inside the value slot, beat .badge on
+   specificity and forced it to display:block, so the pill stretched the full
+   column width instead of hugging its text. */
+.fact > span { display: block; margin-bottom: 3px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.fact > div { font-size: 13px; font-weight: 600; }
+/* A badge inside a fact value must stay an inline pill whatever the slot's
+   own styling does. */
+.fact .badge { display: inline-flex; width: auto; }
 
 .drawer-section { margin-top: 20px; }
 .drawer-section h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
@@ -1215,7 +1533,21 @@ tbody tr:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 }
 .settings-row:last-child { border-bottom: 0; }
 .settings-row strong { display: block; font-size: 13px; }
-.settings-row span { color: var(--muted); font-size: 12px; }
+.settings-row > div > span { color: var(--muted); font-size: 12px; }
+
+/* Group heading inside the modules list, mirroring the sidebar's groups. */
+.settings-group {
+  padding: 14px 18px 6px;
+  color: var(--nav-group);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.settings-group:first-child { padding-top: 4px; }
+
+/* Buttons in a card header, e.g. Change password and Sign out. */
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {
@@ -1255,7 +1587,9 @@ body.detail-open { overflow: hidden; }
   .sidebar-head { align-items: center; }
   .sidebar-brand { padding: 16px 14px; }
   .sidebar-brand img { max-width: 132px; }
-  .drawer-close { display: block; margin: 10px 10px 0 0; }
+  /* Must stay flex, not block: the glyph is centred by align-items and
+     justify-content, which block layout ignores. */
+  .drawer-close { display: flex; }
 
   .sidebar-nav { padding: 8px 0 16px; }
   .nav-group { padding: 16px 16px 6px; }
@@ -1303,6 +1637,10 @@ body.detail-open { overflow: hidden; }
   .greet-text { flex: 1 1 55%; }
   .greet-actions { flex: 1 1 100%; margin-left: 0; }
   .greet-chip { flex: 1 1 auto; justify-content: center; }
+  /* The banner is already two rows on a phone, so the icon alone is enough —
+     the "Updated 4 min ago" text just crowds the chips. */
+  .greet-refresh { margin-left: auto; }
+  .greet-refresh span { display: none; }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .kpi { padding: 15px 16px; }
   .kpi-value { font-size: 27px; }

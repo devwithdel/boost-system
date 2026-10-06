@@ -3,6 +3,35 @@
 (function () {
   "use strict";
 
+  /* Every list endpoint returns paging metadata plus one array of records under
+     a resource name — `rows`, `requests`, `bids`, and so on — and sometimes a
+     second array of filter facets (`types`, `departments`) that must never be
+     mistaken for records. Hard-coding a chain of known names meant every new
+     module silently rendered an empty table until this was widened: the bids
+     list came back with five packages and showed "Nothing to show".
+
+     So the collection is found by shape instead: the first array of objects
+     that is not a known facet. Pages can still name their key explicitly with
+     the `rowsKey` option when the heuristic is not obvious. */
+  var FACET_KEYS = ["types", "departments", "facets", "options", "distribution"];
+
+  function rowsFrom(data, explicitKey) {
+    if (!data || typeof data !== "object") return [];
+
+    if (explicitKey && Array.isArray(data[explicitKey])) return data[explicitKey];
+    if (Array.isArray(data.rows)) return data.rows;
+
+    var keys = Object.keys(data);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (FACET_KEYS.indexOf(key) !== -1) continue;
+      var value = data[key];
+      if (Array.isArray(value) && (!value.length || typeof value[0] === "object")) return value;
+    }
+
+    return [];
+  }
+
   function dataTable(options) {
     var opts = {
       endpoint: "/",
@@ -10,6 +39,7 @@
       filters: [],          // { id, type: 'search'|'select', options:[{value,label}] }
       selectable: false,
       rowKey: "id",
+      rowsKey: null,        // key holding the collection, when it is not obvious
       bulkActions: [],      // { value, label, requiresNote }
       pageSize: 25,
       emptyText: "No records to show.",
@@ -73,11 +103,28 @@
         .map(function (f) {
           if (f.type === "select") {
             var options = (typeof f.options === "function" ? f.options(state.data) : f.options) || [];
+            // Counts come from the server with the facet query, so they describe
+            // the whole result set and not just the rows on this page.
+            var counts = f.counts ? f.counts(state.data) : null;
+            var current = String(state.filters[f.id]);
+
             return (
               '<select data-filter="' + f.id + '" class="dt-input">' +
               options
                 .map(function (o) {
-                  return '<option value="' + BOOST.esc(o.value) + '"' + (String(state.filters[f.id]) === String(o.value) ? " selected" : "") + ">" + BOOST.esc(o.label) + "</option>";
+                  var label = o.label;
+                  if (counts) {
+                    // Every option gets a number, including 0. A status with
+                    // nothing behind it is exactly what someone scanning the
+                    // list is trying to find out.
+                    var n = o.value === "" ? Object.keys(counts).reduce(function (s, k) { return s + counts[k]; }, 0) : counts[o.value];
+                    label += " (" + (typeof n === "number" ? n : 0) + ")";
+                  }
+                  return (
+                    '<option value="' + BOOST.esc(o.value) + '"' + (current === String(o.value) ? " selected" : "") + ">" +
+                    BOOST.esc(label) +
+                    "</option>"
+                  );
                 })
                 .join("") +
               "</select>"
@@ -196,20 +243,25 @@
       );
     }
 
-    function shell() {
+    function renderFilterActions() {
+      // Pinned to the trailing edge as one group, so the buttons hold the
+      // same column on every page instead of sliding left or right with
+      // however many filters that page happens to have.
       return (
-        '<section class="card">' +
-        '<div class="filters">' + renderFilterBar() +
-        // Pinned to the trailing edge as one group, so the buttons hold the
-        // same column on every page instead of sliding left or right with
-        // however many filters that page happens to have.
         '<div class="filter-actions">' +
         '<button class="btn" type="button" data-apply="1">Apply</button>' +
         '<button class="btn ghost" type="button" data-reset="1">Reset</button>' +
         // Page-level actions live in the flow, never floating over the list:
         // a fixed overlay sat on top of the pager's Next button on phones.
         (opts.toolbarActions || "") +
-        "</div>" +
+        "</div>"
+      );
+    }
+
+    function shell() {
+      return (
+        '<section class="card">' +
+        '<div class="filters">' + renderFilterBar() + renderFilterActions() +
         "</div>" +
         renderBulkBar() +
         '<div class="table-scroll" id="dt-table"></div>' +
@@ -217,6 +269,48 @@
         '<div class="dt-pager-slot">' + renderPager(state.data) + "</div>" +
         "</section>"
       );
+    }
+
+    /* A dropdown that does nothing until you hunt for an Apply button reads as
+       broken. Apply on change instead. The search box keeps waiting for Enter or
+       Apply, because it fires on every keystroke otherwise. */
+    function bindFilters() {
+      opts.filters.forEach(function (f) {
+        if (f.type !== "select") return;
+        var el = document.querySelector('[data-filter="' + f.id + '"]');
+        if (!el) return;
+        el.addEventListener("change", function () {
+          state.filters[f.id] = el.value;
+          // A narrower filter almost always invalidates the current page.
+          state.page = 1;
+          refresh();
+        });
+      });
+    }
+
+    /* Redraw just the filter row so the count labels match the data now on
+       screen. Applied to the whole row because the actions are siblings of the
+       inputs inside it, and splitting them apart would change the layout. */
+    function repaintFilters() {
+      var box = document.querySelector(".filters");
+      if (!box) return;
+
+      // A half-typed search has not been applied yet, so it is not in state and
+      // redrawing from state would silently throw it away.
+      var search = box.querySelector('.dt-input[type="search"]');
+      var typed = search ? search.value : null;
+
+      box.innerHTML = renderFilterBar() + renderFilterActions();
+
+      if (typed !== null) {
+        var next = box.querySelector('.dt-input[type="search"]');
+        if (next) next.value = typed;
+      }
+
+      // bind(), not bindFilters(): the Apply and Reset buttons are children of
+      // this row too, so they are new nodes now and would be left dead. bind()
+      // covers every control in the row.
+      bind();
     }
 
     function paint() {
@@ -234,7 +328,7 @@
       return BOOST.json(query())
         .then(function (data) {
           state.data = data;
-          var rows = data.rows || data.requests || data.quotations || data.orders || data.documents || [];
+          var rows = rowsFrom(data, opts.rowsKey);
           // Kept separately so a row click can hand the whole record to the
           // page without another request. state.data is the pager's metadata.
           state.rows = rows;
@@ -255,6 +349,10 @@
 
           var bulkHost = document.querySelector(".dt-bulk");
           if (bulkHost) bulkHost.outerHTML = renderBulkBar();
+
+          // The counts in the filter labels come from this response, so they
+          // have to be redrawn with it — narrowing by department changes them.
+          repaintFilters();
 
           bindTable();
           // The header checkbox is re-created on every render, so restore
@@ -285,6 +383,8 @@
         });
       }
 
+      bindFilters();
+
       var reset = document.querySelector("[data-reset]");
       if (reset) {
         reset.addEventListener("click", function () {
@@ -311,7 +411,7 @@
       var all = document.getElementById("dt-select-all");
       if (!all) return;
 
-      var rows = (state.data && (state.data.rows || state.data.requests)) || [];
+      var rows = rowsFrom(state.data, opts.rowsKey);
       var selectedOnPage = rows.filter(function (r) { return state.selected[r[opts.rowKey]]; }).length;
 
       all.checked = rows.length > 0 && selectedOnPage === rows.length;
@@ -351,8 +451,8 @@ function clickable(cls) {
       var all = document.getElementById("dt-select-all");
       if (all) {
         all.addEventListener("change", function () {
-          var rows = state.data && (state.data.rows || state.data.requests || []);
-          (rows || []).forEach(function (r) {
+          var rows = rowsFrom(state.data, opts.rowsKey);
+          rows.forEach(function (r) {
             state.selected[r[opts.rowKey]] = all.checked;
           });
           refresh();
@@ -423,9 +523,19 @@ function clickable(cls) {
 
           var note = "";
           if (btn.dataset.note === "1") {
-            note = window.prompt("Reason for " + btn.dataset.bulk + " (required):", "") || "";
+            // Speak to the person, not the database: this used to read
+            // "Reason for cancelled (required)", leaking the raw status key.
+            var action = btn.dataset.bulk.replace(/_/g, " ");
+            note =
+              window.prompt(
+                "Reason for cancelling " +
+                  ids.length +
+                  (ids.length === 1 ? " request" : " requests") +
+                  " (required):",
+                ""
+              ) || "";
             if (!note.trim()) {
-              BOOST.toast("A reason is required for that action.", "warn");
+              BOOST.toast("A reason is required to " + action + " a request.", "warn");
               return;
             }
           }
@@ -446,6 +556,10 @@ function clickable(cls) {
               if (!res.ok) throw new Error(res.body.error || "Bulk update failed.");
               BOOST.toast(res.body.message || "Updated.", "ok");
               state.selected = {};
+              // A status change moves work out of the approval queue, so the
+              // sidebar badges and the bell are both stale the moment this
+              // succeeds. Refreshing the table alone left them lying.
+              BOOST.refreshBadges();
               return refresh();
             })
             .catch(function (err) {

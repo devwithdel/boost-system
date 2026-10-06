@@ -56,7 +56,12 @@ function str(req, key) {
   return String(req.query[key] || "").trim();
 }
 
-function meta(req, { page, pages, total, limit, rows }) {
+/* `...extra` is carried through deliberately. This helper used to rebuild the
+   payload from a fixed list of paging keys, which silently swallowed anything
+   else the caller passed — that is how the statusCounts facet went missing from
+   quotations and orders while working fine in requests, whose route builds its
+   response by hand. */
+function meta(req, { page, pages, total, limit, rows, ...extra }) {
   return {
     rows,
     total,
@@ -65,6 +70,7 @@ function meta(req, { page, pages, total, limit, rows }) {
     limit,
     sort: str(req, "sort"),
     dir: String(str(req, "dir")).toLowerCase() === "asc" ? "asc" : "desc",
+    ...extra,
   };
 }
 
@@ -119,12 +125,15 @@ router.get("/quotations", requireAuth, async (req, res) => {
       AND (LOWER(q.quotation_number) LIKE $2 OR LOWER(q.supplier_name) LIKE $2 OR LOWER(q.item_description) LIKE $2)`;
     const args = [status, q];
 
-    const [rowsResult, countResult] = await Promise.all([
+    const [rowsResult, countResult, statusResult] = await Promise.all([
       pool.query(
         `SELECT q.id, q.quotation_number AS "quotationNumber", q.supplier_name AS "supplierName",
                 q.item_description AS description, q.total_amount AS "totalAmount",
                 q.status, q.valid_until AS "validUntil", q.created_at AS "createdAt",
-                r.request_number AS "requestNumber"
+                r.request_number AS "requestNumber",
+                -- The originating estimate, so the drawer can show what the
+                -- quote came in against instead of only its own figure.
+                r.estimated_amount AS "estimatedAmount"
          FROM quotations q
          LEFT JOIN procurement_requests r ON r.id = q.request_id
          WHERE ${where}
@@ -136,10 +145,29 @@ router.get("/quotations", requireAuth, async (req, res) => {
         `SELECT COUNT(*)::int AS total FROM quotations q WHERE ${where}`,
         args
       ),
+      // Per-status counts for the filter labels, ignoring the status filter
+      // itself — see the same note in requests.js. Placeholders restart at $1
+      // because an unreferenced parameter has no type for Postgres to infer.
+      pool.query(
+        `SELECT q.status, COUNT(*)::int AS n
+         FROM quotations q
+         WHERE (LOWER(q.quotation_number) LIKE $1 OR LOWER(q.supplier_name) LIKE $1 OR LOWER(q.item_description) LIKE $1)
+         GROUP BY q.status`,
+        [q]
+      ),
     ]);
 
     const total = countResult.rows[0].total;
-    return res.json(meta(req, { page, pages: Math.ceil(total / limit), total, limit, rows: rowsResult.rows }));
+    return res.json(
+      meta(req, {
+        page,
+        pages: Math.ceil(total / limit),
+        total,
+        limit,
+        rows: rowsResult.rows,
+        statusCounts: Object.fromEntries(statusResult.rows.map((r) => [r.status, r.n])),
+      })
+    );
   } catch (err) {
     console.error("Quotations list error:", err);
     return res.status(500).json({ error: "Could not load quotations." });
@@ -164,7 +192,11 @@ router.get("/orders", requireAuth, async (req, res) => {
         status: "o.status",
         orderedAt: "o.ordered_at",
       },
-      "orderedAt"
+      // Default to the order number, not ordered_at. The two disagree: a PO can
+      // be raised out of sequence, so sorting by date left PO-2026-033 stranded
+      // below older numbers and the list read as random. The number is the
+      // sequence a person actually expects to see running down the column.
+      "orderNumber"
     );
     const q = likeTerm(req);
 
@@ -172,7 +204,7 @@ router.get("/orders", requireAuth, async (req, res) => {
       AND (LOWER(o.order_number) LIKE $2 OR LOWER(o.supplier_name) LIKE $2 OR LOWER(q.quotation_number) LIKE $2)`;
     const args = [status, q];
 
-    const [rowsResult, countResult] = await Promise.all([
+    const [rowsResult, countResult, statusResult] = await Promise.all([
       pool.query(
         `SELECT o.id, o.order_number AS "orderNumber", o.supplier_name AS "supplierName",
                 o.total_amount AS "totalAmount", o.status, o.ordered_at AS "orderedAt",
@@ -191,10 +223,29 @@ router.get("/orders", requireAuth, async (req, res) => {
          WHERE ${where}`,
         args
       ),
+      // Needs the join too: the search term matches on the quotation number.
+      // Placeholders restart at $1 — see the note in the quotations facet.
+      pool.query(
+        `SELECT o.status, COUNT(*)::int AS n
+         FROM purchase_orders o
+         LEFT JOIN quotations q ON q.id = o.quotation_id
+         WHERE (LOWER(o.order_number) LIKE $1 OR LOWER(o.supplier_name) LIKE $1 OR LOWER(q.quotation_number) LIKE $1)
+         GROUP BY o.status`,
+        [q]
+      ),
     ]);
 
     const total = countResult.rows[0].total;
-    return res.json(meta(req, { page, pages: Math.ceil(total / limit), total, limit, rows: rowsResult.rows }));
+    return res.json(
+      meta(req, {
+        page,
+        pages: Math.ceil(total / limit),
+        total,
+        limit,
+        rows: rowsResult.rows,
+        statusCounts: Object.fromEntries(statusResult.rows.map((r) => [r.status, r.n])),
+      })
+    );
   } catch (err) {
     console.error("Orders list error:", err);
     return res.status(500).json({ error: "Could not load purchase orders." });

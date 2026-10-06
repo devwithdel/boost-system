@@ -1,4 +1,4 @@
-/* BOOST — Open Mobile Scanner: capture a document photo, read it with the
+/* BOOST — Scan a Document: capture a document photo, read it with the
    server-side OCR engine, review the extracted fields, save as a request. */
 (function () {
   "use strict";
@@ -264,6 +264,10 @@
 
       document.getElementById("save-request").disabled = true;
       clearDirty();
+
+      // This just created a request, so the sidebar count and the bell are
+      // already out of date. The manual request form does the same.
+      BOOST.refreshBadges();
 
       // The scan is evidence, not just a source of text — keep the photo.
       await attachScan(body.request.id, body.request.requestNumber);

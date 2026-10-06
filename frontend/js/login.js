@@ -4,8 +4,62 @@
   const submitBtn = document.getElementById("signin-btn");
   const toggleBtn = document.getElementById("toggle-password");
   const passwordInput = document.getElementById("password");
+  const identifierInput = document.getElementById("identifier");
+  const rememberInput = document.getElementById("remember");
   const eyeIcon = toggleBtn.querySelector(".icon-eye");
   const eyeOffIcon = toggleBtn.querySelector(".icon-eye-off");
+
+  /* ---- remember me (30 days) ----
+     The session cookie is httpOnly with no persistence flag, so the browser
+     drops it when the window closes. Remembering the address only saves the
+     user retyping it — never the password — and the stored entry expires on
+     its own so an old machine cannot prefill an account months later. */
+  const REMEMBER_KEY = "boost.login.remember";
+  const REMEMBER_DAYS = 30;
+
+  function readRemembered() {
+    try {
+      const raw = window.localStorage.getItem(REMEMBER_KEY);
+      if (!raw) return null;
+      const saved = JSON.parse(raw);
+      if (!saved || typeof saved.identifier !== "string") return null;
+      if (!isFinite(saved.expiresAt) || Date.now() > saved.expiresAt) {
+        window.localStorage.removeItem(REMEMBER_KEY);
+        return null;
+      }
+      return saved.identifier;
+    } catch (e) {
+      return null; // private mode / disabled storage — the form still works
+    }
+  }
+
+  function saveRemembered(identifier) {
+    try {
+      window.localStorage.setItem(
+        REMEMBER_KEY,
+        JSON.stringify({
+          identifier: identifier,
+          expiresAt: Date.now() + REMEMBER_DAYS * 24 * 60 * 60 * 1000,
+        })
+      );
+    } catch (e) {
+      /* nothing to do — the sign-in itself already succeeded */
+    }
+  }
+
+  function clearRemembered() {
+    try {
+      window.localStorage.removeItem(REMEMBER_KEY);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  const remembered = readRemembered();
+  if (remembered) {
+    identifierInput.value = remembered;
+    rememberInput.checked = true;
+  }
 
   toggleBtn.addEventListener("click", () => {
     const isHidden = passwordInput.type === "password";
@@ -38,13 +92,16 @@
     e.preventDefault();
     clearError();
 
-    const identifier = document.getElementById("identifier").value.trim();
+    const identifier = identifierInput.value.trim();
     const password = passwordInput.value;
 
     if (!identifier || !password) {
       showError("Please enter your email and password.");
       return;
     }
+
+    if (rememberInput.checked) saveRemembered(identifier);
+    else clearRemembered();
 
     submitBtn.disabled = true;
     submitBtn.textContent = "Signing in…";

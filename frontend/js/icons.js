@@ -44,6 +44,9 @@
       '<path d="M10.3 20a2 2 0 0 0 3.4 0"/>',
     logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5"/><path d="M5 12h11"/>',
     close: '<path d="M6 6l12 12M18 6L6 18"/>',
+    refresh:
+      '<path d="M20 12a8 8 0 1 1-2.34-5.66"/>' +
+      '<path d="M20 4v4h-4"/>',
     chevronLeft: '<path d="m15 6-6 6 6 6"/>',
     chevronRight: '<path d="m9 6 6 6-6 6"/>',
 

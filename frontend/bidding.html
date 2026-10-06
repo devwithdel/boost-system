@@ -3,14 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="/assets/b-favicon.svg" type="image/svg+xml" />
   <title>BOOST — Bidding Records</title>
-  <link rel="stylesheet" href="/css/app.css?v=31" />
+  <link rel="stylesheet" href="/css/app.css?v=40" />
 </head>
-<body data-page="bidding" data-title="Bidding Records"
-      data-soon-title="Bidding Records"
-      data-soon-text="Bid submissions, bid opening results and award decisions will live on this page. The dashboard win-rate card already counts awarded bids, so the data model is in place.">
-  <script src="/js/layout.js?v=25"></script>
-  <script src="/js/icons.js?v=15"></script>
-  <script src="/js/soon.js?v=1"></script>
+<body data-page="bidding" data-title="Bidding Records">
+  <div class="app"><aside class="sidebar"><div class="sidebar-head"><a class="sidebar-brand" href="/dashboard"><img src="/assets/boost-logo-mark.png" alt="BOOST" /><span>Procurement and Order Operations System</span></a></div></aside><div class="main"><header class="topbar"><div class="topbar-main"><h1>Bidding Records</h1><div class="topbar-spacer"></div></div></header><main class="content" id="main-content" tabindex="-1"><div id="page"><div class="state-msg"><div class="spinner"></div><p>Loading…</p></div></div></main></div></div>
+  <script defer src="/js/layout.js?v=31"></script>
+  <script defer src="/js/icons.js?v=17"></script>
+  <!-- datatable.js defines BOOST.dataTable, which bidding.js uses to build the list. -->
+  <script defer src="/js/datatable.js?v=32"></script>
+  <script defer src="/js/bidding.js?v=4"></script>
 </body>
 </html>

@@ -19,7 +19,7 @@
       group: "Documents",
       items: [
         { key: "documents", href: "/documents", label: "Document Repository", icon: "documents" },
-        { key: "scanner", href: "/scanner", label: "Open Mobile Scanner", icon: "scanner" },
+        { key: "scanner", href: "/scanner", label: "Scan a Document", icon: "scanner" },
       ],
     },
     {
@@ -70,6 +70,22 @@
 
   function badge(status) {
     return '<span class="badge ' + esc(status) + '">' + esc(label(status)) + "</span>";
+  }
+
+  /* The status filter was rebuilt by hand in five modules and they had already
+     drifted apart. One definition, used everywhere, with the counts wired to the
+     `statusCounts` facet the list endpoints return. */
+  function statusFilter(statuses, allLabel) {
+    return {
+      id: "status",
+      type: "select",
+      options: [""].concat(statuses).map(function (s) {
+        return { value: s, label: s ? label(s) : allLabel || "All statuses" };
+      }),
+      counts: function (data) {
+        return (data && data.statusCounts) || null;
+      },
+    };
   }
 
   function shell() {
@@ -264,6 +280,43 @@
           return loadNotifications();
         }
       });
+  }
+
+  /* Badges are a snapshot taken once per page load, so any update made on a
+     different page left the nav lying until a manual reload. Each module used to
+     remember to call refreshBadges() after its own mutations — which is exactly
+     the thing that gets forgotten when someone adds a new action. So rather than
+     trust every call site, re-read on the way back to the tab and slowly while
+     it is being watched. Cheap: two small GETs, and the count is unchanged
+     almost every time. */
+  var badgeCheckedAt = 0;
+
+  function revalidateBadges() {
+    // Rebuilding the bell while someone is reading it is worse than a number
+    // that is a minute old.
+    if (notif.open) return;
+    // visibilitychange and focus normally fire together; a burst of events
+    // should not turn into a burst of requests.
+    if (Date.now() - badgeCheckedAt < 30 * 1000) return;
+
+    badgeCheckedAt = Date.now();
+    refreshBadges();
+  }
+
+  function watchBadges() {
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) revalidateBadges();
+    });
+    window.addEventListener("focus", revalidateBadges);
+    // Back/forward restores the page from the bfcache without a reload, so
+    // whatever is on screen is what was true when the tab was hidden.
+    window.addEventListener("pageshow", function (e) {
+      if (e.persisted) revalidateBadges();
+    });
+    setInterval(function () {
+      // Only a tab being looked at is worth polling.
+      if (!document.hidden) revalidateBadges();
+    }, 60 * 1000);
   }
 
   function loading(label) {
@@ -537,6 +590,7 @@
   function mount(render) {
     shell();
     initBell();
+    watchBadges();
 
     return me()
       .then(function (payload) {
@@ -646,6 +700,7 @@
   /* ---- shared activity trail rendering ---- */
 
   var ENTITY_LABEL = {
+    bid: "Bid",
     request: "Request",
     quotation: "Quotation",
     order: "Purchase order",
@@ -657,6 +712,7 @@
     quotation: "/quotations?q=",
     order: "/orders?q=",
     document: "/documents?q=",
+    bid: "/bidding?q=",
   };
 
   var ENTITY_ICON = {
@@ -664,6 +720,7 @@
     quotation: "quotations",
     order: "orders",
     document: "documents",
+    bid: "bidding",
   };
 
   function timelineHtml(events) {
@@ -708,6 +765,15 @@
   // Mirrors the server's rules so the buttons match what the API will accept.
   // The server still validates; this only avoids offering impossible moves.
   var MODULE_TRANSITIONS = {
+    // Bid packages: draft -> open -> closed -> awarded, matching
+    // routes/bidding.js.
+    bid: {
+      draft: ["open", "cancelled"],
+      open: ["closed", "awarded", "cancelled"],
+      closed: ["awarded", "cancelled"],
+      awarded: [],
+      cancelled: [],
+    },
     quotation: {
       draft: ["active", "cancelled"],
       active: ["awarded", "expired", "cancelled"],
@@ -724,7 +790,22 @@
     },
   };
 
-  var MODULE_PATH = { quotation: "quotations", order: "orders" };
+  var MODULE_PATH = { bid: "bids", quotation: "quotations", order: "orders" };
+
+  /**
+   * The nav as data, for pages that need to reflect it. Settings lists the
+   * modules from this instead of keeping its own copy, which went stale the
+   * moment a placeholder shipped and then quietly lied about it.
+   */
+  function navItems() {
+    var out = [];
+    NAV.forEach(function (g) {
+      g.items.forEach(function (item) {
+        out.push({ group: g.group, label: item.label, href: item.href, key: item.key });
+      });
+    });
+    return out;
+  }
 
   /**
    * Opens a record drawer with its status actions and audit history.
@@ -812,6 +893,7 @@
 
   window.BOOST = {
     mount: mount,
+    navItems: navItems,
     me: me,
     json: json,
     esc: esc,
@@ -820,6 +902,7 @@
     fmtDate: fmtDate,
     badge: badge,
     label: label,
+    statusFilter: statusFilter,
     entityLabel: function (type) { return ENTITY_LABEL[type] || "Record"; },
     entityHref: function (type, ref) {
       return (ENTITY_HREF[type] || "/requests?q=") + encodeURIComponent(ref || "");
